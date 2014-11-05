@@ -1,0 +1,8 @@
+# No compiled stuff
+*.exe
+*.o
+*.so
+*.zip
+
+# Don't track builds
+build/**

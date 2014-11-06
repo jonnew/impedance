@@ -23,9 +23,7 @@
 #define SIGNALPROCESSOR_H
 
 #include <queue>
-#include <QVector>
-#include <QString>
-#include <QDataStream>
+#include "qtinclude.h"
 #include "signalchannel.h"
 #include "globalconstants.h"
 

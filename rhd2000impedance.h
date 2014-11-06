@@ -6,25 +6,29 @@
 #include "rhd2000evalboard.h"
 #include "rhd2000registers.h"
 #include "rhd2000datablock.h"
-#include "okFrontPanelDLL.h"
 
 // Included class objects
 class Rhd2000EvalBoard;
 class SignalProcessor;
 class Rhd2000Registers;
+class SignalSources;
+class SignalGroup;
+class SignalChannel;
 
 using namespace std;
 
-class Rhd2000impedance
+class Rhd2000Impedance
 {
 
 public:
 
     // Imdepdance measurement class
-    Rhd2000impedance(int port);
+    Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port);
 
     // User-twidlable
-    void measureImpedance();
+    int measureImpedance();
+    int measureImpedance(int channel);
+    void configureImpedanceMeasurement();
     void changeImpedanceFrequency(double Fs);
 
 
@@ -34,8 +38,9 @@ private:
     void setupEvalBoard();
     void setupAmplifier();
     void changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs);
+    //void createCommands();
     void updateImpedanceFrequency();
-    int deviceID();
+    int deviceId(Rhd2000DataBlock *dataBlock, int stream, int &register59Value);
     void factorOutParallelCapacitance(double &impedanceMagnitude,
                                       double &impedancePhase,
                                       double frequency,
@@ -50,6 +55,10 @@ private:
     // Class-wide objects
     Rhd2000EvalBoard *evalBoard;
     SignalProcessor *signalProcessor;
+    SignalSources *signalSources;
+
+    // Registers than can be used to configure the chip(s)
+    Rhd2000Registers *chipRegisters;
 
     // Background desired/corrected parameter tracking
     Rhd2000EvalBoard::BoardPort usedPort;
@@ -71,6 +80,26 @@ private:
     bool impedanceFreqValid;
     double cableLengthMeters;
     double boardSampleRate;
+
+    // Data structs
+    int ttlOut[16];
+    QVector<int> chipId;
+    queue<Rhd2000DataBlock> dataQueue;
+    queue<Rhd2000DataBlock> filteredDataQueue;
+    unsigned int numUsbBlocksToRead;
+
+    // Parameters and data used to derive impedance measurements
+    bool impedanceConfigured;
+    int numPeriods;
+    int numBlocks;
+    double relativePeriod;
+    QVector<QVector<QVector<double> > > measuredMagnitude;
+    QVector<QVector<QVector<double> > > measuredPhase;
+
+    // Data file stuff (this will be changed/removed)
+    SaveFormat saveFormat;
+    QDataStream *saveStream;
+
 
 };
 

@@ -23,6 +23,9 @@
 #define SIGNALGROUP_H
 
 #include "signalchannel.h"
+#include "qtinclude.h"
+
+class SignalChannel;
 
 class SignalGroup
 {

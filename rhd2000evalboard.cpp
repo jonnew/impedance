@@ -20,10 +20,11 @@
 
 #include <iostream>
 #include <iomanip>
-#include <fstream>
 #include <vector>
 #include <queue>
-#include <cmath>
+
+//#include <fstream>
+//#include <cmath>
 
 #include "rhd2000evalboard.h"
 #include "rhd2000datablock.h"
@@ -57,7 +58,7 @@ int Rhd2000EvalBoard::open()
     string serialNumber = "";
     int i, nDevices;
 
-    cout << "---- Intan Technologies ---- Rhythm RHD2000 Controller v1.0 ----" << endl << endl;
+    //cout << "---- Intan Technologies ---- Rhythm RHD2000 Controller v1.0 ----" << endl << endl;
     if (okFrontPanelDLL_LoadLib(NULL) == false) {
         cerr << "FrontPanel DLL could not be loaded.  " <<
                 "Make sure this DLL is in the application start directory." << endl;
@@ -790,7 +791,7 @@ void Rhd2000EvalBoard::setCableLengthFeet(BoardPort port, double lengthInFeet)
 double Rhd2000EvalBoard::estimateCableLengthMeters(int delay) const
 {
     double tStep, cableVelocity, distance;
-    const double speedOfLight = 299792458.0;  // units = meters per second
+    const double speedOfLight = 299792458.0;        // units = meters per second
     const double xilinxLvdsOutputDelay = 1.9e-9;    // 1.9 ns Xilinx LVDS output pin delay
     const double xilinxLvdsInputDelay = 1.4e-9;     // 1.4 ns Xilinx LVDS input pin delay
     const double rhd2000Delay = 9.0e-9;             // 9.0 ns RHD2000 SCLK-to-MISO delay
@@ -801,7 +802,7 @@ double Rhd2000EvalBoard::estimateCableLengthMeters(int delay) const
     cableVelocity = 0.555 * speedOfLight;  // propogation velocity on cable: version 1.4 improvement based on cable measurements
 
     // distance = cableVelocity * (delay * tStep - (xilinxLvdsOutputDelay + rhd2000Delay + xilinxLvdsInputDelay));  // version 1.3 and earlier
-    distance = cableVelocity * ((((double) delay) - 1.0) * tStep - (xilinxLvdsOutputDelay + rhd2000Delay + xilinxLvdsInputDelay + misoSettleTime));  // version 1.4 improvement
+    distance = cableVelocity * ((((double) delay)) * tStep - (xilinxLvdsOutputDelay + rhd2000Delay + xilinxLvdsInputDelay + misoSettleTime));  // version 1.4 improvement
     if (distance < 0.0) distance = 0.0;
 
     return (distance / 2.0);

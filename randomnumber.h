@@ -22,7 +22,7 @@
 #ifndef RANDOMNUMBER_H
 #define RANDOMNUMBER_H
 
-#include "qtincludes.h"
+#include "qtinclude.h"
 
 class RandomNumber
 {

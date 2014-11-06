@@ -5,13 +5,16 @@
 #include "globalconstants.h"
 #include "signalprocessor.h"
 #include "signalchannel.h"
+#include "signalsources.h"
+#include "qtinclude.h"
 
 #include "okFrontPanelDLL.h"
 
-#include <cmath>
-#include <QVector>
+//#include <cmath>
 
-Rhd2000impedance::Rhd2000impedance(int port)
+using namespace std;
+
+Rhd2000Impedance::Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port)
 {
     // Initialized default parameters
     cout << "Intializing internal default parameters...";
@@ -34,9 +37,12 @@ Rhd2000impedance::Rhd2000impedance(int port)
     desiredImpedanceFreq = 1000.0;
     actualImpedanceFreq = 0.0;
     impedanceFreqValid = false;
+    impedanceConfigured = false;
 
-    // Get a signal processor
+    // Get a signal processor, sources, etc
     signalProcessor = new SignalProcessor();
+    signalSources = new SignalSources();
+    chipRegisters = new Rhd2000Registers(boardSampleRate);
 
     // Set default filter freqs
     notchFilterFrequency = 60.0;
@@ -47,19 +53,120 @@ Rhd2000impedance::Rhd2000impedance(int port)
     highpassFilterEnabled = false;
     signalProcessor->setHighpassFilterEnabled(highpassFilterEnabled);
 
+    // Chip metadata
+    chipId.resize(MAX_NUM_DATA_STREAMS);
+    chipId.fill(-1);
+
+    // Zero digital outs
+    for (int i = 0; i < 16; ++i) {
+        ttlOut[i] = 0;
+    }
+
     cout << "done." << endl;
 }
 
-// Measure the impedance on all channels
-void Rhd2000impedance::measureImpedance()
+void Rhd2000Impedance::configureImpedanceMeasurement()
 {
     // Run private setup routines
     setupEvalBoard();
     setupAmplifier();
 
+    // Disable external fast settling, since this interferes with DAC commands in AuxCmd1.
+    evalBoard->enableExternalFastSettle(false);
+
+    // Disable auxiliary digital output control during impedance measurements.
+    evalBoard->enableExternalDigOut(usedPort, false);
+
+    // Create a fresh chipRegisters instance
+    chipRegisters->defineSampleRate(boardSampleRate);
+    vector<int> commandList;
+    int commandSequenceLength;
+
+    // Create a command list for the AuxCmd1 slot defining a sine wave at the
+    // selected impedance test waveform frequency
+    commandSequenceLength =
+            chipRegisters->createCommandListZcheckDac(commandList, actualImpedanceFreq, 128.0);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd1, 1);
+    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1,
+                                      0, commandSequenceLength - 1);
+    evalBoard->selectAuxCommandBank(usedPort,
+                                    Rhd2000EvalBoard::AuxCmd1, 1);
+
+    // Select number of periods to measure impedance over
+    numPeriods = qRound(0.020 * actualImpedanceFreq); // Test each channel for at least 20 msec...
+    if (numPeriods < 5) numPeriods = 5; // ...but always measure across no fewer than 5 complete periods
+    relativePeriod = boardSampleRate / actualImpedanceFreq;
+    numBlocks = qCeil((numPeriods + 2.0) * relativePeriod / 60.0);  // + 2 periods to give time to settle initially
+    if (numBlocks < 2) numBlocks = 2;   // need first block for command to switch channels to take effect.
+
+    // Update filter settings etc
+    actualDspCutoffFreq = chipRegisters->setDspCutoffFreq(desiredDspCutoffFreq);
+    actualLowerBandwidth = chipRegisters->setLowerBandwidth(desiredLowerBandwidth);
+    actualUpperBandwidth = chipRegisters->setUpperBandwidth(desiredUpperBandwidth);
+    chipRegisters->enableDsp(dspEnabled);
+    chipRegisters->enableZcheck(true);
+    commandSequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, false);
+
+    // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
+    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd3, 0, commandSequenceLength - 1);
+    evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 3);
+
+    evalBoard->setContinuousRunMode(false);
+    evalBoard->setMaxTimeStep(SAMPLES_PER_DATA_BLOCK * numBlocks);
+
+    // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
+    // of all amplifier channels (32 on each data stream) at three different Cseries values.
+    measuredMagnitude.resize(evalBoard->getNumEnabledDataStreams());
+    measuredPhase.resize(evalBoard->getNumEnabledDataStreams());
+    for (int i = 0; i < evalBoard->getNumEnabledDataStreams(); ++i)
+    {
+        measuredMagnitude[i].resize(32);
+        measuredPhase[i].resize(32);
+        for (int j = 0; j < 32; ++j)
+        {
+            measuredMagnitude[i][j].resize(3);
+            measuredPhase[i][j].resize(3);
+        }
+    }
+
+    // Now we are configured
+    impedanceConfigured = true;
+
+}
+
+int Rhd2000Impedance::measureImpedance() {
+
+    // Turn LEDs on to indicate that data acquisition is running.
+    ttlOut[15] = 1;
+    int ledArray[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+    int ledIndex = 0;
+    evalBoard->setLedDisplay(ledArray);
+    evalBoard->setTtlOut(ttlOut);
+
+    // Single channel data collection and processing here.
+    for (int channel = 0; channel < 32; ++channel)
+    {
+        measureImpedance(channel);
+    }
+
+    // Advance LED display
+    ledArray[ledIndex] = 0;
+    ledIndex++;
+    if (ledIndex == 8) ledIndex = 0;
+    ledArray[ledIndex] = 1;
+    evalBoard->setLedDisplay(ledArray);
+
+    // Success
+    return 0;
+
+}
+
+// Measure the impedance on all channels
+int Rhd2000Impedance::measureImpedance(int channel)
+{
     // Stuff we will need to do the measurements
-    Rhd2000Registers chipRegisters(boardSampleRate);
-    int commandSequenceLength, stream, channel, capRange;
+    int commandSequenceLength, stream, capRange;
     double cSeries;
     vector<int> commandList;
     int triggerIndex;                       // dummy reference variable; not used
@@ -75,69 +182,24 @@ void Rhd2000impedance::measureImpedance()
         }
     }
 
-    // Disable external fast settling, since this interferes with DAC commands in AuxCmd1.
-    evalBoard->enableExternalFastSettle(false);
-
-    // Disable auxiliary digital output control during impedance measurements.
-    evalBoard->enableExternalDigOut(usedPort, false);
-
-    // Turn LEDs on to indicate that data acquisition is running.
-    ttlOut[15] = 1;
-    int ledArray[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-    int ledIndex = 0;
-    evalBoard->setLedDisplay(ledArray);
-    evalBoard->setTtlOut(ttlOut);
-
-    // Create a command list for the AuxCmd1 slot defining a sine wave at the
-    // selected impedance test waveform frequency
-    commandSequenceLength =
-            chipRegisters.createCommandListZcheckDac(commandList, actualImpedanceFreq, 128.0);
-    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd1, 1);
-    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1,
-                                      0, commandSequenceLength - 1);
-    evalBoard->selectAuxCommandBank(usedPort,
-                                    Rhd2000EvalBoard::AuxCmd1, 1);
-
-    // Select number of periods to measure impedance over
-    int numPeriods = qRound(0.020 * actualImpedanceFreq); // Test each channel for at least 20 msec...
-    if (numPeriods < 5) numPeriods = 5; // ...but always measure across no fewer than 5 complete periods
-    double period = boardSampleRate / actualImpedanceFreq;
-    int numBlocks = qCeil((numPeriods + 2.0) * period / 60.0);  // + 2 periods to give time to settle initially
-    if (numBlocks < 2) numBlocks = 2;   // need first block for command to switch channels to take effect.
-
-    // Update filter settings etc
-    actualDspCutoffFreq = chipRegisters.setDspCutoffFreq(desiredDspCutoffFreq);
-    actualLowerBandwidth = chipRegisters.setLowerBandwidth(desiredLowerBandwidth);
-    actualUpperBandwidth = chipRegisters.setUpperBandwidth(desiredUpperBandwidth);
-    chipRegisters.enableDsp(dspEnabled);
-    chipRegisters.enableZcheck(true);
-    commandSequenceLength = chipRegisters.createCommandListRegisterConfig(commandList, false);
-
-    // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
-    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
-    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd3, 0, commandSequenceLength - 1);
-    evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 3);
-
-    evalBoard->setContinuousRunMode(false);
-    evalBoard->setMaxTimeStep(SAMPLES_PER_DATA_BLOCK * numBlocks);
-
-    // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
-    // of all amplifier channels (32 on each data stream) at three different Cseries values.
-    QVector<QVector<QVector<double> > > measuredMagnitude;
-    QVector<QVector<QVector<double> > > measuredPhase;
-    measuredMagnitude.resize(evalBoard->getNumEnabledDataStreams());
-    measuredPhase.resize(evalBoard->getNumEnabledDataStreams());
-    for (int i = 0; i < evalBoard->getNumEnabledDataStreams(); ++i)
+    if (channel >= 32 && !rhd2164ChipPresent)
     {
-        measuredMagnitude[i].resize(32);
-        measuredPhase[i].resize(32);
-        for (int j = 0; j < 32; ++j)
-        {
-            measuredMagnitude[i][j].resize(3);
-            measuredPhase[i][j].resize(3);
-        }
+        cout << "Selected channel = " << channel << " but a 64-channel "
+                "chip was not detected." << endl;
+        return -1 ;
     }
 
+    if (!impedanceConfigured)
+    {
+        cout << "You must configure the impedance measurement "
+                "before measuring impedance." << endl;
+        return -1;
+    }
+
+    // Gate ttlOut_15 to indicate that we are performing an impedance sweep
+    // on a single channel
+    //ttlOut[15] = 1;
+    //evalBoard->setTtlOut(ttlOut);
 
     // We execute three complete electrode impedance measurements: one each with
     // Cseries set to 0.1 pF, 1 pF, and 10 pF.  Then we select the best measurement
@@ -146,143 +208,144 @@ void Rhd2000impedance::measureImpedance()
     {
         switch (capRange) {
         case 0:
-            chipRegisters.setZcheckScale(Rhd2000Registers::ZcheckCs100fF);
+            chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs100fF);
             cSeries = 0.1e-12;
             break;
         case 1:
-            chipRegisters.setZcheckScale(Rhd2000Registers::ZcheckCs1pF);
+            chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs1pF);
             cSeries = 1.0e-12;
             break;
         case 2:
-            chipRegisters.setZcheckScale(Rhd2000Registers::ZcheckCs10pF);
+            chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs10pF);
             cSeries = 10.0e-12;
             break;
         }
 
-        // Check all 32 channels across all active data streams.
-        for (channel = 0; channel < 32; ++channel) {
+        chipRegisters->setZcheckChannel(channel);
+        commandSequenceLength =
+                chipRegisters->createCommandListRegisterConfig(commandList, false);
 
-            chipRegisters.setZcheckChannel(channel);
-            commandSequenceLength =
-                    chipRegisters.createCommandListRegisterConfig(commandList, false);
+        // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
+        evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
 
-            // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
-            evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
+        // Run the test signal, collect the data
+        evalBoard->run();
+        while (evalBoard->isRunning() ) { }
 
-            evalBoard->run();
-            while (evalBoard->isRunning() ) { }
-            evalBoard->readDataBlocks(numBlocks, dataQueue);
-            signalProcessor->loadAmplifierData(dataQueue, numBlocks, false, 0, 0, triggerIndex, bufferQueue,
-                                               false, *saveStream, saveFormat, false, false, 0);
-            for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream) {
-                if (chipId[stream] != CHIP_ID_RHD2164_B) {
-                    signalProcessor->measureComplexAmplitude(measuredMagnitude, measuredPhase,
-                                                        capRange, stream, channel,  numBlocks, boardSampleRate,
-                                                        actualImpedanceFreq, numPeriods);
-               }
-            }
+        evalBoard->readDataBlocks(numBlocks, dataQueue);
+        signalProcessor->loadAmplifierData(dataQueue, numBlocks, false,
+                                           0, 0, triggerIndex, bufferQueue,
+                                           false, *saveStream, saveFormat,
+                                           false, false, 0);
 
-            // If an RHD2164 chip is plugged in, we have to set the Zcheck select register to channels 32-63
-            // and repeat the previous steps.
-            if (rhd2164ChipPresent) {
-                chipRegisters.setZcheckChannel(channel + 32); // address channels 32-63
-                commandSequenceLength =
-                        chipRegisters.createCommandListRegisterConfig(commandList, false);
-                // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
-                evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
+        for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream)
+        {
+            signalProcessor->measureComplexAmplitude(measuredMagnitude,
+                                                     measuredPhase,
+                                                     capRange,
+                                                     stream,
+                                                     channel,
+                                                     numBlocks,
+                                                     boardSampleRate,
+                                                     actualImpedanceFreq,
+                                                     numPeriods);
 
-                evalBoard->run();
-                while (evalBoard->isRunning() ) { }
-                evalBoard->readDataBlocks(numBlocks, dataQueue);
-                signalProcessor->loadAmplifierData(dataQueue, numBlocks, false, 0, 0, triggerIndex, bufferQueue,
-                                                   false, *saveStream, saveFormat, false, false, 0);
-                for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream) {
-                    if (chipId[stream] == CHIP_ID_RHD2164_B) {
-                        signalProcessor->measureComplexAmplitude(measuredMagnitude, measuredPhase,
-                                                            capRange, stream, channel,  numBlocks, boardSampleRate,
-                                                            actualImpedanceFreq, numPeriods);
-                    }
-                }
-            }
-
-            // Advance LED display
-            ledArray[ledIndex] = 0;
-            ledIndex++;
-            if (ledIndex == 8) ledIndex = 0;
-            ledArray[ledIndex] = 1;
-            evalBoard->setLedDisplay(ledArray);
         }
+
+        //            // If an RHD2164 chip is plugged in, we have to set the Zcheck select register to channels 32-63
+        //            // and repeat the previous steps.
+        //            if (rhd2164ChipPresent) {
+        //                chipRegisters.setZcheckChannel(channel + 32); // address channels 32-63
+        //                commandSequenceLength =
+        //                        chipRegisters.createCommandListRegisterConfig(commandList, false);
+        //                // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
+        //                evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
+
+        //                evalBoard->run();
+        //                while (evalBoard->isRunning() ) { }
+        //                evalBoard->readDataBlocks(numBlocks, dataQueue);
+        //                signalProcessor->loadAmplifierData(dataQueue, numBlocks, false, 0, 0, triggerIndex, bufferQueue,
+        //                                                   false, *saveStream, saveFormat, false, false, 0);
+        //                for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream) {
+        //                    if (chipId[stream] == CHIP_ID_RHD2164_B) {
+        //                        signalProcessor->measureComplexAmplitude(measuredMagnitude, measuredPhase,
+        //                                                                 capRange, stream, channel,  numBlocks, boardSampleRate,
+        //                                                                 actualImpedanceFreq, numPeriods);
+        //                    }
+        //                }
+        //            }
+
+
+        //}
     }
 
-    // Now that we have the raw response data for each series cap value and each channel
+    // Now that we have the raw response data for each series cap value
     // we can process that data to derive the reistance and phase values for
-    // each channel
+    // the channel under test
     SignalChannel *signalChannel;
     double distance, minDistance, current, Cseries;
     double impedanceMagnitude, impedancePhase;
 
     const double bestAmplitude = 250.0;  // we favor voltage readings that are closest to 250 uV: not too large,
-                                         // and not too small.
+    // and not too small.
     const double dacVoltageAmplitude = 128 * (1.225 / 256);  // this assumes the DAC amplitude was set to 128
     const double parasiticCapacitance = 14.0e-12;  // 14 pF: an estimate of on-chip parasitic capacitance,
-                                                   // including 10 pF of amplifier input capacitance.
+    // including 10 pF of amplifier input capacitance.
     double relativeFreq = actualImpedanceFreq / boardSampleRate;
 
     int bestAmplitudeIndex;
     for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream)
     {
-        for (channel = 0; channel < 32; ++channel)
+        signalChannel = signalSources->findAmplifierChannel(stream, channel);
+
+        if (signalChannel)
         {
-            signalChannel = signalSources->findAmplifierChannel(stream, channel);
-            if (signalChannel)
+            minDistance = 9.9e99;  // ridiculously large number
+            for (capRange = 0; capRange < 3; ++capRange)
             {
-                minDistance = 9.9e99;  // ridiculously large number
-                for (capRange = 0; capRange < 3; ++capRange)
+                // Find the measured amplitude that is closest to bestAmplitude on a logarithmic scale
+                distance = qAbs(qLn(measuredMagnitude[stream][channel][capRange] / bestAmplitude));
+                if (distance < minDistance)
                 {
-                    // Find the measured amplitude that is closest to bestAmplitude on a logarithmic scale
-                    distance = qAbs(qLn(measuredMagnitude[stream][channel][capRange] / bestAmplitude));
-                    if (distance < minDistance)
-                    {
-                        bestAmplitudeIndex = capRange;
-                        minDistance = distance;
-                    }
+                    bestAmplitudeIndex = capRange;
+                    minDistance = distance;
                 }
-                switch (bestAmplitudeIndex)
-                {
-                case 0:
-                    Cseries = 0.1e-12;
-                    break;
-                case 1:
-                    Cseries = 1.0e-12;
-                    break;
-                case 2:
-                    Cseries = 10.0e-12;
-                    break;
-                }
-
-                // Calculate current amplitude produced by on-chip voltage DAC
-                current = TWO_PI * actualImpedanceFreq * dacVoltageAmplitude * Cseries;
-
-                // Calculate impedance magnitude from calculated current and measured voltage.
-                impedanceMagnitude = 1.0e-6 * (measuredMagnitude[stream][channel][bestAmplitudeIndex] / current) *
-                        (18.0 * relativeFreq * relativeFreq + 1.0);
-
-                // Calculate impedance phase, with small correction factor accounting for the
-                // 3-command SPI pipeline delay.
-                impedancePhase = measuredPhase[stream][channel][bestAmplitudeIndex] + (360.0 * (3.0 / period));
-
-                // Factor out on-chip parasitic capacitance from impedance measurement.
-                factorOutParallelCapacitance(impedanceMagnitude, impedancePhase, actualImpedanceFreq,
-                                             parasiticCapacitance);
-
-                // Perform empirical resistance correction to improve accuarcy at sample rates below
-                // 15 kS/s.
-                empiricalResistanceCorrection(impedanceMagnitude, impedancePhase,
-                                              boardSampleRate);
-
-                signalChannel->electrodeImpedanceMagnitude = impedanceMagnitude;
-                signalChannel->electrodeImpedancePhase = impedancePhase;
             }
+            switch (bestAmplitudeIndex)
+            {
+            case 0:
+                Cseries = 0.1e-12;
+                break;
+            case 1:
+                Cseries = 1.0e-12;
+                break;
+            case 2:
+                Cseries = 10.0e-12;
+                break;
+            }
+
+            // Calculate current amplitude produced by on-chip voltage DAC
+            current = TWO_PI * actualImpedanceFreq * dacVoltageAmplitude * Cseries;
+
+            // Calculate impedance magnitude from calculated current and measured voltage.
+            impedanceMagnitude = 1.0e-6 * (measuredMagnitude[stream][channel][bestAmplitudeIndex] / current) *
+                    (18.0 * relativeFreq * relativeFreq + 1.0);
+
+            // Calculate impedance phase, with small correction factor accounting for the
+            // 3-command SPI pipeline delay.
+            impedancePhase = measuredPhase[stream][channel][bestAmplitudeIndex] + (360.0 * (3.0 / relativePeriod));
+
+            // Factor out on-chip parasitic capacitance from impedance measurement.
+            factorOutParallelCapacitance(impedanceMagnitude, impedancePhase, actualImpedanceFreq,
+                                         parasiticCapacitance);
+
+            // Perform empirical resistance correction to improve accuarcy at sample rates below
+            // 15 kS/s.
+            empiricalResistanceCorrection(impedanceMagnitude, impedancePhase,
+                                          boardSampleRate);
+
+            signalChannel->electrodeImpedanceMagnitude = impedanceMagnitude;
+            signalChannel->electrodeImpedancePhase = impedancePhase;
         }
     }
 
@@ -296,24 +359,28 @@ void Rhd2000impedance::measureImpedance()
     evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::PortA, Rhd2000EvalBoard::AuxCmd3, 1);
 
     // Turn off LED.
-    for (int i = 0; i < 8; ++i) ledArray[i] = 0;
     ttlOut[15] = 0;
-    evalBoard->setLedDisplay(ledArray);
     evalBoard->setTtlOut(ttlOut);
+
+    // Success
+    return 0;
 }
 
 // Public method for changing impedance test signal frequency
-void Rhd2000impedance::changeImpedanceFrequency(double Fs)
+void Rhd2000Impedance::changeImpedanceFrequency(double Fs)
 {
+    impedanceConfigured = false;
     desiredImpedanceFreq = Fs;
     updateImpedanceFrequency();
+    configureImpedanceMeasurement();
+
 }
 
 // This function loads the Intan firmware to the evaluation board and scans port
 // A for an Intan chip
-void Rhd2000impedance::setupEvalBoard()
+void Rhd2000Impedance::setupEvalBoard()
 {
-    cout << "Intializing evaluation board...";
+    cout << "Intializing evaluation board..." << endl;
     evalBoard = new Rhd2000EvalBoard;
 
     // Open Opal Kelly XEM6010 board.
@@ -328,10 +395,10 @@ void Rhd2000impedance::setupEvalBoard()
 
     // Load Rhythm FPGA configuration bitfile (provided by Intan Technologies).
     // Place main.bit in the executable directory, or add a complete path to file.
-    string bitfilename = "main.bit";
+    string bitfilename = "M:/public/impedance/build/debug/main.bit";
     if (!evalBoard->uploadFpgaBitfile(bitfilename))
     {
-        cout << "FPGA configuration file upload error."
+        cout << "FPGA configuration file upload error. "
                 "Make sure file main.bit is in the same "
                 "directory as the executable file." << endl;
 
@@ -340,14 +407,16 @@ void Rhd2000impedance::setupEvalBoard()
 
     // Initialize board.
     evalBoard->initialize();
+
+    cout << "Evaluation board initialization successful." << endl;
 }
 
 // Perform amplifier calibration, find the cable delay, prepare configuration and
 // data measurement commands, etc.
-void Rhd2000impedance::setupAmplifier()
+void Rhd2000Impedance::setupAmplifier()
 {
 
-    int delay, stream, id;
+    int delay, stream, id, i, channel, auxName, vddName;
     int register59Value;
     int numChannelsOnPort = 0;
     QVector<int> portIndex, portIndexOld, chipIdOld;
@@ -369,46 +438,30 @@ void Rhd2000impedance::setupAmplifier()
 
     switch (usedPort)
     {
-        case Rhd2000EvalBoard::PortA :
-        {
-            initStreamPorts = {
-                Rhd2000EvalBoard::PortA1,
-                Rhd2000EvalBoard::PortA2 };
-            initStreamDdrPorts = {
-                Rhd2000EvalBoard::PortA1Ddr,
-                Rhd2000EvalBoard::PortA2Ddr };
-            break;
-        }
-        case Rhd2000EvalBoard::PortB :
-        {
-            initStreamPorts = {
-                Rhd2000EvalBoard::PortB1,
-                Rhd2000EvalBoard::PortB2 };
-            initStreamDdrPorts = {
-                Rhd2000EvalBoard::PortB1Ddr,
-                Rhd2000EvalBoard::PortB2Ddr };
-            break;
-        }
-        case Rhd2000EvalBoard::PortC :
-        {
-            initStreamPorts = {
-                Rhd2000EvalBoard::PortC1,
-                Rhd2000EvalBoard::PortC2 };
-            initStreamDdrPorts = {
-                Rhd2000EvalBoard::PortC1Ddr,
-                Rhd2000EvalBoard::PortC2Ddr };
-            break;
-        }
-        case Rhd2000EvalBoard::PortD :
-        {
-            initStreamPorts = {
-                Rhd2000EvalBoard::PortD1,
-                Rhd2000EvalBoard::PortD2 };
-            initStreamDdrPorts = {
-                Rhd2000EvalBoard::PortD1Ddr,
-                Rhd2000EvalBoard::PortD2Ddr };
-            break;
-        }
+    case Rhd2000EvalBoard::PortA :
+        initStreamPorts[0]  = Rhd2000EvalBoard::PortA1;
+        initStreamPorts[1]  = Rhd2000EvalBoard::PortA2;
+        initStreamDdrPorts[0] = Rhd2000EvalBoard::PortA1Ddr;
+        initStreamDdrPorts[1] = Rhd2000EvalBoard::PortA2Ddr;
+        break;
+    case Rhd2000EvalBoard::PortB :
+        initStreamPorts[0]  = Rhd2000EvalBoard::PortB1;
+        initStreamPorts[1]  = Rhd2000EvalBoard::PortB2;
+        initStreamDdrPorts[0] = Rhd2000EvalBoard::PortB1Ddr;
+        initStreamDdrPorts[1] = Rhd2000EvalBoard::PortB2Ddr;
+        break;
+    case Rhd2000EvalBoard::PortC :
+        initStreamPorts[0]  = Rhd2000EvalBoard::PortC1;
+        initStreamPorts[1]  = Rhd2000EvalBoard::PortC2;
+        initStreamDdrPorts[0] = Rhd2000EvalBoard::PortC1Ddr;
+        initStreamDdrPorts[1] = Rhd2000EvalBoard::PortC2Ddr;
+        break;
+    case Rhd2000EvalBoard::PortD :
+        initStreamPorts[0]  = Rhd2000EvalBoard::PortD1;
+        initStreamPorts[1]  = Rhd2000EvalBoard::PortD2;
+        initStreamDdrPorts[0] = Rhd2000EvalBoard::PortD1Ddr;
+        initStreamDdrPorts[1] = Rhd2000EvalBoard::PortD2Ddr;
+        break;
     }
 
     // Bring the sample rate up the highest possible amount to maximize the need
@@ -433,8 +486,7 @@ void Rhd2000impedance::setupAmplifier()
     evalBoard->enableDataStream(1, true);
 
     // Select the command sequence with amplifier configuration
-    evalBoard->selectAuxCommandBank(usedPort,
-                                    Rhd2000EvalBoard::AuxCmd3, 0);
+    evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 0);
 
     // Since our longest command sequence is 60 commands, we run the SPI
     // interface for 60 samples.
@@ -448,14 +500,16 @@ void Rhd2000impedance::setupAmplifier()
     QVector<int> indexFirstGoodDelay(MAX_NUM_DATA_STREAMS, -1);
     QVector<int> indexSecondGoodDelay(MAX_NUM_DATA_STREAMS, -1);
 
+    cout << "Finding MISO read delays to account for cable length..." << endl;
+
     // Run SPI command sequence at all 16 possible FPGA MISO delay settings
     // to find optimum delay for each SPI interface cable.
     for (delay = 0; delay < 16; ++delay)
     {
-        cout << "Finding MISO read delays to account for cabling...";
-
         // Set current cable delay
         evalBoard->setCableDelay(usedPort, delay);
+        double delayns = 1.0e9 * (double)evalBoard->getCableDelay(usedPort)*(1.0/2800.0) * (1.0/evalBoard->getSampleRate());
+        cout << "   testing " << delayns << " ns delay." << endl;
 
         // Start SPI interface.
         evalBoard->run();
@@ -468,7 +522,7 @@ void Rhd2000impedance::setupAmplifier()
 
         // Read the Intan chip ID number from each RHD2000 chip found.
         // Record delay settings that yield good communication with the chip.
-        for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream)
+        for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream)
         {
             // Figure out if the dataBlock contains valid data
             id = deviceId(dataBlock, stream, register59Value);
@@ -506,10 +560,13 @@ void Rhd2000impedance::setupAmplifier()
         }
     }
 
-    evalBoard->setCableDelay(usedPort,qMax(optimumDelay[0], optimumDelay[1]));
+    int optDelay = qMax(optimumDelay[0], optimumDelay[1]);
+    double delayns = 1.0e9 * (double)optDelay*(1.0/2800.0) * (1.0/evalBoard->getSampleRate());
+    cout << "Optimal delay: " << delayns << " ns." << endl;
+    evalBoard->setCableDelay(usedPort,optDelay);
     cableLengthMeters =
-            evalBoard->estimateCableLengthMeters(qMax(optimumDelay[0],
-                                                 optimumDelay[1]));
+            evalBoard->estimateCableLengthMeters(optDelay);
+    cout << "Estimated cable length: " << cableLengthMeters << " meters." << endl;
 
     // Now that we found the cable length, discard the datablock
     delete dataBlock;
@@ -523,20 +580,20 @@ void Rhd2000impedance::setupAmplifier()
         if (chipIdOld[stream] == CHIP_ID_RHD2216) {
             numStreamsRequired++;
             if (numStreamsRequired <= MAX_NUM_DATA_STREAMS) {
-                numChannelsOnPort[portIndexOld[stream]] += 16;
+                numChannelsOnPort += 16;
             }
             rhd2216ChipPresent = true;
         }
         if (chipIdOld[stream] == CHIP_ID_RHD2132) {
             numStreamsRequired++;
             if (numStreamsRequired <= MAX_NUM_DATA_STREAMS) {
-                numChannelsOnPort[portIndexOld[stream]] += 32;
+                numChannelsOnPort += 32;
             }
         }
         if (chipIdOld[stream] == CHIP_ID_RHD2164) {
             numStreamsRequired += 2;
             if (numStreamsRequired <= MAX_NUM_DATA_STREAMS) {
-                numChannelsOnPort[portIndexOld[stream]] += 64;
+                numChannelsOnPort += 64;
             }
         }
     }
@@ -547,40 +604,131 @@ void Rhd2000impedance::setupAmplifier()
         if ((chipIdOld[oldStream] == CHIP_ID_RHD2216) && (stream < MAX_NUM_DATA_STREAMS)) {
             chipId[stream] = CHIP_ID_RHD2216;
             portIndex[stream] = portIndexOld[oldStream];
-            if (!synthMode) {
-                evalBoard->enableDataStream(stream, true);
-                evalBoard->setDataSource(stream, initStreamPorts[oldStream]);
-            }
+            evalBoard->enableDataStream(stream, true);
+            evalBoard->setDataSource(stream, initStreamPorts[oldStream]);
             stream++;
         } else if ((chipIdOld[oldStream] == CHIP_ID_RHD2132) && (stream < MAX_NUM_DATA_STREAMS)) {
             chipId[stream] = CHIP_ID_RHD2132;
             portIndex[stream] = portIndexOld[oldStream];
-            if (!synthMode) {
-                evalBoard->enableDataStream(stream, true);
-                evalBoard->setDataSource(stream, initStreamPorts[oldStream]);
-            }
+            evalBoard->enableDataStream(stream, true);
+            evalBoard->setDataSource(stream, initStreamPorts[oldStream]);
             stream++ ;
         } else if ((chipIdOld[oldStream] == CHIP_ID_RHD2164) && (stream < MAX_NUM_DATA_STREAMS - 1)) {
             chipId[stream] = CHIP_ID_RHD2164;
             chipId[stream + 1] =  CHIP_ID_RHD2164_B;
             portIndex[stream] = portIndexOld[oldStream];
             portIndex[stream + 1] = portIndexOld[oldStream];
-            if (!synthMode) {
-                evalBoard->enableDataStream(stream, true);
-                evalBoard->enableDataStream(stream + 1, true);
-                evalBoard->setDataSource(stream, initStreamPorts[oldStream]);
-                evalBoard->setDataSource(stream + 1, initStreamDdrPorts[oldStream]);
-            }
+            evalBoard->enableDataStream(stream, true);
+            evalBoard->enableDataStream(stream + 1, true);
+            evalBoard->setDataSource(stream, initStreamPorts[oldStream]);
+            evalBoard->setDataSource(stream + 1, initStreamDdrPorts[oldStream]);
             stream += 2;
         }
     }
 
     // Disable unused data streams.
     for (; stream < MAX_NUM_DATA_STREAMS; ++stream) {
-        if (!synthMode) {
-            evalBoard->enableDataStream(stream, false);
+        evalBoard->enableDataStream(stream, false);
+    }
+
+    // Add channel descriptions to the SignalSources object to create a list of all waveforms.
+    if (numChannelsOnPort == 0) {
+        signalSources->signalPort[usedPort].channel.clear();
+        signalSources->signalPort[usedPort].enabled = false;
+    } else if (signalSources->signalPort[usedPort].numAmplifierChannels() !=
+               numChannelsOnPort) {  // if number of channels on port has changed...
+        signalSources->signalPort[usedPort].channel.clear();  // ...clear existing channels...
+        // ...and create new ones.
+        channel = 0;
+        // Create amplifier channels for each chip.
+        for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
+            if (portIndex[stream] == usedPort) {
+                if (chipId[stream] == CHIP_ID_RHD2216) {
+                    for (i = 0; i < 16; ++i) {
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                    }
+                } else if (chipId[stream] == CHIP_ID_RHD2132) {
+                    for (i = 0; i < 32; ++i) {
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                    }
+                } else if (chipId[stream] == CHIP_ID_RHD2164) {
+                    for (i = 0; i < 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                    }
+                } else if (chipId[stream] == CHIP_ID_RHD2164_B) {
+                    for (i = 0; i < 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                    }
+                }
+            }
+        }
+        // Now create auxiliary input channels and supply voltage channels for each chip.
+        auxName = 1;
+        vddName = 1;
+        for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
+            if (portIndex[stream] == usedPort) {
+                if (chipId[stream] == CHIP_ID_RHD2216 ||
+                        chipId[stream] == CHIP_ID_RHD2132 ||
+                        chipId[stream] == CHIP_ID_RHD2164) {
+                    signalSources->signalPort[usedPort].addAuxInputChannel(channel++, 0, auxName++, stream);
+                    signalSources->signalPort[usedPort].addAuxInputChannel(channel++, 1, auxName++, stream);
+                    signalSources->signalPort[usedPort].addAuxInputChannel(channel++, 2, auxName++, stream);
+                    signalSources->signalPort[usedPort].addSupplyVoltageChannel(channel++, 0, vddName++, stream);
+                }
+            }
         }
     }
+    else
+    {    // If number of channels on port has not changed, don't create new channels (since this
+        // would clear all user-defined channel names.  But we must update the data stream indices
+        // on the port.
+        channel = 0;
+        // Update stream indices for amplifier channels.
+        for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
+            if (portIndex[stream] == usedPort) {
+                if (chipId[stream] == CHIP_ID_RHD2216) {
+                    for (i = channel; i < channel + 16; ++i) {
+                        signalSources->signalPort[usedPort].channel[i].boardStream = stream;
+                    }
+                    channel += 16;
+                } else if (chipId[stream] == CHIP_ID_RHD2132) {
+                    for (i = channel; i < channel + 32; ++i) {
+                        signalSources->signalPort[usedPort].channel[i].boardStream = stream;
+                    }
+                    channel += 32;
+                } else if (chipId[stream] == CHIP_ID_RHD2164) {
+                    for (i = channel; i < channel + 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
+                        signalSources->signalPort[usedPort].channel[i].boardStream = stream;
+                    }
+                    channel += 32;
+                } else if (chipId[stream] == CHIP_ID_RHD2164_B) {
+                    for (i = channel; i < channel + 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
+                        signalSources->signalPort[usedPort].channel[i].boardStream = stream;
+                    }
+                    channel += 32;
+                }
+            }
+        }
+        // Update stream indices for auxiliary channels and supply voltage channels.
+        for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
+            if (portIndex[stream] == usedPort) {
+                if (chipId[stream] == CHIP_ID_RHD2216 ||
+                        chipId[stream] == CHIP_ID_RHD2132 ||
+                        chipId[stream] == CHIP_ID_RHD2164) {
+                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
+                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
+                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
+                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
+                }
+            }
+        }
+    }
+
+
+
+    // Allocate space for data being streamed from the eval board in the
+    // signal processor object
+    signalProcessor->allocateMemory(evalBoard->getNumEnabledDataStreams());
 
     // Return sample rate to 20 kHz which is good for impedance testing.
     changeSampleRate(Rhd2000EvalBoard::SampleRate20000Hz);
@@ -588,41 +736,41 @@ void Rhd2000impedance::setupAmplifier()
 
 // Change the sample rate of the evalboard, update all parameters dependent on
 // the new sample rate
-void Rhd2000impedance::changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs)
+void Rhd2000Impedance::changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs)
 {
-    Rhd2000EvalBoard::AmplifierSampleRate sampleRate =
-            Rhd2000EvalBoard::SampleRate20000Hz;
+    Rhd2000EvalBoard::AmplifierSampleRate sampleRate;
 
     // Allow three sample rates to be choosen
     switch (Fs)
     {
-        case Rhd2000EvalBoard::SampleRate10000Hz:
-            sampleRate = Rhd2000EvalBoard::SampleRate10000Hz;
-            boardSampleRate = 10000.0;
-            numUsbBlocksToRead = 6;
-            break;
-        case Rhd2000EvalBoard::SampleRate20000Hz:
-            sampleRate = Rhd2000EvalBoard::SampleRate20000Hz;
-            boardSampleRate = 20000.0;
-            numUsbBlocksToRead = 12;
-            break;
-        case Rhd2000EvalBoard::SampleRate30000Hz:
-            sampleRate = Rhd2000EvalBoard::SampleRate30000Hz;
-            boardSampleRate = 30000.0;
-            numUsbBlocksToRead = 16;
-            break;
-        default:
-            cout << "Use either SampleRate10000Hz, 20000Hz, or 30000Hz. "
-                    "Set by defualt set to 20000Hz." << endl;
-            sampleRate = Rhd2000EvalBoard::SampleRate20000Hz;
-            boardSampleRate = 20000.0;
-            numUsbBlocksToRead = 12;
-            break;
+    case Rhd2000EvalBoard::SampleRate10000Hz:
+        sampleRate = Rhd2000EvalBoard::SampleRate10000Hz;
+        boardSampleRate = 10000.0;
+        numUsbBlocksToRead = 6;
+        break;
+    case Rhd2000EvalBoard::SampleRate20000Hz:
+        sampleRate = Rhd2000EvalBoard::SampleRate20000Hz;
+        boardSampleRate = 20000.0;
+        numUsbBlocksToRead = 12;
+        break;
+    case Rhd2000EvalBoard::SampleRate30000Hz:
+        sampleRate = Rhd2000EvalBoard::SampleRate30000Hz;
+        boardSampleRate = 30000.0;
+        numUsbBlocksToRead = 16;
+        break;
+    default:
+        cout << "Use either SampleRate10000Hz, 20000Hz, or 30000Hz. "
+                "Set by defualt set to 20000Hz." << endl;
+        sampleRate = Rhd2000EvalBoard::SampleRate20000Hz;
+        boardSampleRate = 20000.0;
+        numUsbBlocksToRead = 12;
+        break;
     }
 
     // Set up an RHD2000 register object using this sample rate to
     // optimize MUX-related register settings.
-    Rhd2000Registers chipRegisters(boardSampleRate);
+    chipRegisters->defineSampleRate(boardSampleRate);
+    //Rhd2000Registers chipRegisters(boardSampleRate);
 
     // Now, we will optimize the chip for the selected sample rate
     int commandSequenceLength;
@@ -635,28 +783,28 @@ void Rhd2000impedance::changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs
     // update Register 3, which controls the auxiliary digital output pin on each RHD2000 chip.
     // In concert with the v1.4 Rhythm FPGA code, this permits real-time control of the digital
     // output pin on chips on each SPI port.
-    chipRegisters.setDigOutLow();   // Take auxiliary output out of HiZ mode.
-    commandSequenceLength = chipRegisters.createCommandListUpdateDigOut(commandList);
+    chipRegisters->setDigOutLow();   // Take auxiliary output out of HiZ mode.
+    commandSequenceLength = chipRegisters->createCommandListUpdateDigOut(commandList);
     evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd1, 0);
     evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1, 0, commandSequenceLength - 1);
     evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd1, 0);
 
     // Next, we'll create a command list for the AuxCmd2 slot.  This command sequence
     // will sample the temperature sensor and other auxiliary ADC inputs.
-    commandSequenceLength = chipRegisters.createCommandListTempSensor(commandList);
+    commandSequenceLength = chipRegisters->createCommandListTempSensor(commandList);
     evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd2, 0);
     evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd2, 0, commandSequenceLength - 1);
     evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd2, 0);
 
     // Before generating register configuration command sequences, set amplifier
     // bandwidth paramters.
-    actualDspCutoffFreq = chipRegisters.setDspCutoffFreq(desiredDspCutoffFreq);
-    actualLowerBandwidth = chipRegisters.setLowerBandwidth(desiredLowerBandwidth);
-    actualUpperBandwidth = chipRegisters.setUpperBandwidth(desiredUpperBandwidth);
-    chipRegisters.enableDsp(dspEnabled);
+    actualDspCutoffFreq = chipRegisters->setDspCutoffFreq(desiredDspCutoffFreq);
+    actualLowerBandwidth = chipRegisters->setLowerBandwidth(desiredLowerBandwidth);
+    actualUpperBandwidth = chipRegisters->setUpperBandwidth(desiredUpperBandwidth);
+    chipRegisters->enableDsp(dspEnabled);
 
     // Generate configuration commands
-    chipRegisters.createCommandListRegisterConfig(commandList, true);
+    chipRegisters->createCommandListRegisterConfig(commandList, true);
 
     // Upload version with ADC calibration to AuxCmd3 RAM Bank 0.
     evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 0);
@@ -664,24 +812,30 @@ void Rhd2000impedance::changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs
                                       commandSequenceLength - 1);
 
     // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
-    commandSequenceLength = chipRegisters.createCommandListRegisterConfig(commandList, false);
+    commandSequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, false);
     evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 1);
     evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd3, 0,
                                       commandSequenceLength - 1);
+
+    // Select the AuxCmd3 RAM w/o calibration as the default
+    evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::PortA, Rhd2000EvalBoard::AuxCmd3, 1);
 
     // Update signal processor settings since they are dependent on the sample rate
     signalProcessor->setNotchFilter(notchFilterFrequency, notchFilterBandwidth, boardSampleRate);
     signalProcessor->setHighpassFilter(highpassFilterFrequency, boardSampleRate);
 
-    // Update the impedance test frequency since this is dependent on the sample rate
+    // Update the impedance test frequency and measurement configuration
+    // since they dependent on the sample rate
     impedanceFreqValid = false;
     updateImpedanceFrequency();
+    impedanceConfigured = false;
+    configureImpedanceMeasurement();
 }
 
 // Update electrode impedance measurement frequency, after checking that
 // requested test frequency lies within acceptable ranges based on the
 // amplifier bandwidth and the sampling rate.
-void Rhd2000impedance::updateImpedanceFrequency()
+void Rhd2000Impedance::updateImpedanceFrequency()
 {
     cout << "Updating impedance test frequency...";
 
@@ -730,6 +884,9 @@ void Rhd2000impedance::updateImpedanceFrequency()
         cout << "Invalid impedance test frequency." << endl;
         exit(EXIT_FAILURE);
     }
+
+    impedanceConfigured = false;
+    configureImpedanceMeasurement();
 }
 
 // Return the Intan chip ID stored in ROM register 63.  If the data is invalid
@@ -737,7 +894,7 @@ void Rhd2000impedance::updateImpedanceFrequency()
 // then return -1.  The value of ROM register 59 is also returned.  This register
 // has a value of 0 on RHD2132 and RHD2216 chips, but in RHD2164 chips it is used
 // to align the DDR MISO A/B data from the SPI bus.  (Register 59 has a value of 53 on MISO A and a value of 58 on MISO B.)
-int Rhd2000impedance::deviceId(Rhd2000DataBlock *dataBlock, int stream, int &register59Value)
+int Rhd2000Impedance::deviceId(Rhd2000DataBlock *dataBlock, int stream, int &register59Value)
 {
     bool intanChipPresent;
 
@@ -746,13 +903,13 @@ int Rhd2000impedance::deviceId(Rhd2000DataBlock *dataBlock, int stream, int &reg
     // This is just used to verify that we are getting good data over the SPI
     // communication channel.
     intanChipPresent = ((char) dataBlock->auxiliaryData[stream][2][32] == 'I' &&
-                        (char) dataBlock->auxiliaryData[stream][2][33] == 'N' &&
-                        (char) dataBlock->auxiliaryData[stream][2][34] == 'T' &&
-                        (char) dataBlock->auxiliaryData[stream][2][35] == 'A' &&
-                        (char) dataBlock->auxiliaryData[stream][2][36] == 'N' &&
-                        (char) dataBlock->auxiliaryData[stream][2][24] == 'R' &&
-                        (char) dataBlock->auxiliaryData[stream][2][25] == 'H' &&
-                        (char) dataBlock->auxiliaryData[stream][2][26] == 'D');
+            (char) dataBlock->auxiliaryData[stream][2][33] == 'N' &&
+            (char) dataBlock->auxiliaryData[stream][2][34] == 'T' &&
+            (char) dataBlock->auxiliaryData[stream][2][35] == 'A' &&
+            (char) dataBlock->auxiliaryData[stream][2][36] == 'N' &&
+            (char) dataBlock->auxiliaryData[stream][2][24] == 'R' &&
+            (char) dataBlock->auxiliaryData[stream][2][25] == 'H' &&
+            (char) dataBlock->auxiliaryData[stream][2][26] == 'D');
 
     // If the SPI communication is bad, return -1.  Otherwise, return the Intan
     // chip ID number stored in ROM regstier 63.
@@ -771,7 +928,8 @@ int Rhd2000impedance::deviceId(Rhd2000DataBlock *dataBlock, int stream, int &reg
 // with a parasitic capacitance (i.e., due to the amplifier input capacitance and other
 // capacitances associated with the chip bondpads), this function factors out the effect of the
 // parasitic capacitance to return the acutal electrode impedance.
-void Rhd2000impedance::factorOutParallelCapacitance(double &impedanceMagnitude,
+
+void Rhd2000Impedance::factorOutParallelCapacitance(double &impedanceMagnitude,
                                                     double &impedancePhase,
                                                     double frequency,
                                                     double parasiticCapacitance)
@@ -797,7 +955,7 @@ void Rhd2000impedance::factorOutParallelCapacitance(double &impedanceMagnitude,
 // 2-pole lowpass filter.  This function attempts to somewhat correct for this, but a better
 // solution is to always run impedance measurements at 20 kS/s, where they seem to be most
 // accurate.
-void Rhd2000impedance::empiricalResistanceCorrection(double &impedanceMagnitude,
+void Rhd2000Impedance::empiricalResistanceCorrection(double &impedanceMagnitude,
                                                      double &impedancePhase,
                                                      double boardSampleRate)
 {

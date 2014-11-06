@@ -22,8 +22,7 @@
 #ifndef SIGNALSOURCES_H
 #define SIGNALSOURCES_H
 
-#include <QString>
-#include <QDataStream>
+#include "qtinclude.h"
 
 class SignalGroup;
 class SignalChannel;

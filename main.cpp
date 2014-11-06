@@ -28,7 +28,8 @@ using namespace std;
 
 int main(int argc, char *argv[])
 {
-    Rhd2000impedance *impedance = new Rhd2000impedance(0);
-    impedance->measureImpedance();
+    Rhd2000Impedance *impedance = new Rhd2000Impedance(Rhd2000EvalBoard::PortA);
+    impedance->configureImpedanceMeasurement();
+    impedance->measureImpedance(1);
 
 }

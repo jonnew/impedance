@@ -22,6 +22,8 @@
 #ifndef SIGNALCHANNEL_H
 #define SIGNALCHANNEL_H
 
+#include "signalgroup.h"
+#include "qtinclude.h"
 
 class SignalGroup;
 class QDataStream;

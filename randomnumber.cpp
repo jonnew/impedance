@@ -19,11 +19,8 @@
 //  You should have received a copy of the GNU Lesser General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#include <QTime>
-#include <qmath.h>
 
-#include "qtincludes.h"
-
+#include "qtinclude.h"
 #include "randomnumber.h"
 
 // Generates random numbers from both uniform and Gaussian distrubtions

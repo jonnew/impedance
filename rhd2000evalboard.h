@@ -26,8 +26,6 @@
 #define MAX_NUM_DATA_STREAMS 8
 #define FIFO_CAPACITY_WORDS 67108864
 
-#include <queue>
-
 using namespace std;
 
 class okCFrontPanel;

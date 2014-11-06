@@ -27,7 +27,8 @@ SOURCES += main.cpp \
     signalsources.cpp
 
 OTHER_FILES += \
-    okFrontPanel.dll
+    okFrontPanel.dll \
+    main.bit
 
 HEADERS += \
     okFrontPanelDLL.h \
@@ -40,4 +41,5 @@ HEADERS += \
     signalchannel.h \
     randomnumber.h \
     signalgroup.h \
-    signalsources.h
+    signalsources.h \
+    qtinclude.h

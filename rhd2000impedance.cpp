@@ -67,9 +67,6 @@ Rhd2000Impedance::Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port)
 
 void Rhd2000Impedance::configureImpedanceMeasurement()
 {
-    // Run private setup routines
-    setupEvalBoard();
-    setupAmplifier();
 
     // Disable external fast settling, since this interferes with DAC commands in AuxCmd1.
     evalBoard->enableExternalFastSettle(false);
@@ -366,14 +363,54 @@ int Rhd2000Impedance::measureImpedance(int channel)
     return 0;
 }
 
+// Measure the impedance on all channels
+int Rhd2000Impedance::measureImpedance(int channel, double Fs)
+{
+    // Switch to desired impedance test frequency, generate
+    // the test signal, and test impedance
+    changeImpedanceFrequency(Fs);
+    return measureImpedance(channel);
+}
+
 // Public method for changing impedance test signal frequency
 void Rhd2000Impedance::changeImpedanceFrequency(double Fs)
 {
-    impedanceConfigured = false;
+    // Examine desired frequency to make sure its OK
     desiredImpedanceFreq = Fs;
     updateImpedanceFrequency();
+
+    // Update impedance measurment configurations with new test freq.
+    impedanceConfigured = false;
     configureImpedanceMeasurement();
 
+}
+
+void Rhd2000Impedance::printImpedance(int channel)
+{
+
+    // Construct channel name
+    SignalChannel *signalChannel;
+
+    switch (usedPort)
+    {
+    case Rhd2000EvalBoard::PortA :
+        signalChannel = &signalSources->signalPort[0].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortB :
+        signalChannel = &signalSources->signalPort[1].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortC :
+        signalChannel = &signalSources->signalPort[2].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortD :
+        signalChannel = &signalSources->signalPort[3].channel[channel];
+        break;
+    }
+
+   // cout << "* " << signalChannel->nativeChannelName <<" Impedance Results *" << endl;
+    cout << "   Test freq. (Hz): " <<  actualImpedanceFreq << endl;
+    cout << "   Magnitude (ohms): " << signalChannel->electrodeImpedanceMagnitude << endl;
+    cout << "   Phase (deg.): " << signalChannel->electrodeImpedancePhase << endl;
 }
 
 // This function loads the Intan firmware to the evaluation board and scans port
@@ -837,7 +874,7 @@ void Rhd2000Impedance::changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs
 // amplifier bandwidth and the sampling rate.
 void Rhd2000Impedance::updateImpedanceFrequency()
 {
-    cout << "Updating impedance test frequency...";
+    cout << "Updating impedance test frequency..." << endl;
 
     int impedancePeriod;
     double lowerBandwidthLimit, upperBandwidthLimit;
@@ -881,12 +918,14 @@ void Rhd2000Impedance::updateImpedanceFrequency()
     }
     else
     {
-        cout << "Invalid impedance test frequency." << endl;
-        exit(EXIT_FAILURE);
+        cout << "   Invalid impedance test frequency."      << endl;
+        cout << "   Impedance waveform must have :"         << endl;
+        cout << "       freq >= " << lowerBandwidthLimit    << endl;
+        cout << "       freq <= " << upperBandwidthLimit    << endl;
+        cout << "       period > 4 samples"                 << endl;
+        cout << "       period < 1024 samples"              << endl;
+        cout << "   Test frequency temporarly set to 0."    << endl;
     }
-
-    impedanceConfigured = false;
-    configureImpedanceMeasurement();
 }
 
 // Return the Intan chip ID stored in ROM register 63.  If the data is invalid

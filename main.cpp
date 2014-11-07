@@ -29,7 +29,11 @@ using namespace std;
 int main(int argc, char *argv[])
 {
     Rhd2000Impedance *impedance = new Rhd2000Impedance(Rhd2000EvalBoard::PortA);
+    impedance->setupEvalBoard();
+    impedance->setupAmplifier();
+
     impedance->configureImpedanceMeasurement();
     impedance->measureImpedance(1);
+    impedance->printImpedance(1);
 
 }

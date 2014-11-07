@@ -26,17 +26,21 @@ public:
     Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port);
 
     // User-twidlable
-    int measureImpedance();
-    int measureImpedance(int channel);
+    void setupEvalBoard();
+    void setupAmplifier();
     void configureImpedanceMeasurement();
     void changeImpedanceFrequency(double Fs);
+    int measureImpedance();
+    int measureImpedance(int channel);
+    int measureImpedance(int channel, double Fs);
+    void printImpedance(int channel);
 
+    // This structure exposes all channel information and impedance results
+    SignalSources *signalSources;
 
 private:
 
     // Private functions
-    void setupEvalBoard();
-    void setupAmplifier();
     void changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs);
     //void createCommands();
     void updateImpedanceFrequency();
@@ -55,7 +59,6 @@ private:
     // Class-wide objects
     Rhd2000EvalBoard *evalBoard;
     SignalProcessor *signalProcessor;
-    SignalSources *signalSources;
 
     // Registers than can be used to configure the chip(s)
     Rhd2000Registers *chipRegisters;

@@ -1,0 +1,8 @@
+ScreenWidth=700
+ScreenHeight=600
+AutoOpen=Y
+AutoDatabase=M:/public/impedance/impedance-pcb/impedance.BOMdb
+Database=M:/public/impedance/impedance-pcb/impedance.BOMdb
+AutoOpenSetup=Y
+AutoSetup=
+CsvSeparator=,

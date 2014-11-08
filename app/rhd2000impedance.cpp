@@ -669,14 +669,21 @@ void Rhd2000Impedance::setupAmplifier()
     }
 
     // Add channel descriptions to the SignalSources object to create a list of all waveforms.
-    if (numChannelsOnPort == 0) {
+    if (numChannelsOnPort == 0)
+    {
         signalSources->signalPort[usedPort].channel.clear();
         signalSources->signalPort[usedPort].enabled = false;
-    } else if (signalSources->signalPort[usedPort].numAmplifierChannels() !=
-               numChannelsOnPort) {  // if number of channels on port has changed...
-        signalSources->signalPort[usedPort].channel.clear();  // ...clear existing channels...
+    }
+    else if (signalSources->signalPort[usedPort].numAmplifierChannels() !=
+               numChannelsOnPort)
+    {  // if number of channels on port has changed...
+
+        // ...clear existing channels...
+        signalSources->signalPort[usedPort].channel.clear();
+
         // ...and create new ones.
         channel = 0;
+
         // Create amplifier channels for each chip.
         for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
             if (portIndex[stream] == usedPort) {
@@ -699,6 +706,7 @@ void Rhd2000Impedance::setupAmplifier()
                 }
             }
         }
+
         // Now create auxiliary input channels and supply voltage channels for each chip.
         auxName = 1;
         vddName = 1;

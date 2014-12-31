@@ -10,9 +10,9 @@
 #include <QDataStream>
 #include <QTime>
 #include <qmath.h>
-
 #include <QVector>
-# include <iostream>
+#include <iostream>
+#include <time.h>
 
 
 #endif // QTINCLUDE_H

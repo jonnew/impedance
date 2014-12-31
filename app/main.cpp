@@ -31,9 +31,9 @@ int main(int argc, char *argv[])
     Rhd2000Impedance *impedance = new Rhd2000Impedance(Rhd2000EvalBoard::PortA);
     impedance->setupEvalBoard();
     impedance->setupAmplifier();
-
+    impedance->selectChannel(1);
     impedance->configureImpedanceMeasurement();
-    impedance->measureImpedance(1);
-    impedance->printImpedance(1);
+    impedance->measureImpedance();
+    impedance->printImpedance();
 
 }

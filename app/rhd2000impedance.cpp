@@ -6,6 +6,7 @@
 #include "signalprocessor.h"
 #include "signalchannel.h"
 #include "signalsources.h"
+#include "platecontrol.h"
 #include "qtinclude.h"
 
 #include "okFrontPanelDLL.h"
@@ -43,6 +44,9 @@ Rhd2000Impedance::Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port)
     signalProcessor = new SignalProcessor();
     signalSources = new SignalSources();
     chipRegisters = new Rhd2000Registers(boardSampleRate);
+
+    // Create plating control object
+    plateControl = new PlateControl(0, 0.1, 0, 1, 2);
 
     // Set default filter freqs
     notchFilterFrequency = 60.0;
@@ -132,19 +136,54 @@ void Rhd2000Impedance::configureImpedanceMeasurement()
 
 }
 
-int Rhd2000Impedance::measureImpedance() {
+// Select the channel, relative the the currenly selected port, that should
+// be tied to the elec_test/impedance measurment AC coupling path on the RHD
+int Rhd2000Impedance::selectChannel(int selectedChannel) {
+
+    // Check to see if the 64 channel chip is present
+    bool rhd2164ChipPresent = false;
+    for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream)
+    {
+        if (chipId[stream] == CHIP_ID_RHD2164_B)
+        {
+            rhd2164ChipPresent = true;
+        }
+    }
+
+    if (selectedChannel >= 32 && !rhd2164ChipPresent)
+    {
+        cout << "Selected channel = " << channel << " but a 64-channel "
+                "chip was not detected." << endl;
+        return -1 ;
+    }
+    else if (selectedChannel >= 64) {
+        cout << "Attempted to select a channel greater than 63. Please select a "
+                "channel within the range of your amplifer" << endl;
+        return -1 ;
+    }
+
+    channel = selectedChannel;
+    chipRegisters->setZcheckChannel(channel);
+    channelSelected = true;
+
+}
+
+// Cycle through 32 channels to measure impedance
+int Rhd2000Impedance::measureAllImpedances() {
 
     // Turn LEDs on to indicate that data acquisition is running.
     ttlOut[15] = 1;
     int ledArray[8] = {1, 0, 0, 0, 0, 0, 0, 0};
     int ledIndex = 0;
     evalBoard->setLedDisplay(ledArray);
-    evalBoard->setTtlOut(ttlOut);
 
     // Single channel data collection and processing here.
-    for (int channel = 0; channel < 32; ++channel)
+    // TODO: This does not account for the fact that a 64 channel headstage
+    // can be plugged in!
+    for (int channelIdx = 0; channelIdx < 32; ++channelIdx)
     {
-        measureImpedance(channel);
+        selectChannel(channelIdx);
+        measureImpedance();
     }
 
     // Advance LED display
@@ -159,8 +198,8 @@ int Rhd2000Impedance::measureImpedance() {
 
 }
 
-// Measure the impedance on all channels
-int Rhd2000Impedance::measureImpedance(int channel)
+// Measure the impedance on selected channel
+int Rhd2000Impedance::measureImpedance()
 {
     // Stuff we will need to do the measurements
     int commandSequenceLength, stream, capRange;
@@ -169,27 +208,18 @@ int Rhd2000Impedance::measureImpedance(int channel)
     int triggerIndex;                       // dummy reference variable; not used
     queue<Rhd2000DataBlock> bufferQueue;    // dummy reference variable; not used
 
-    // Check to see if the 64 channel chip is present
-    bool rhd2164ChipPresent = false;
-    for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream)
-    {
-        if (chipId[stream] == CHIP_ID_RHD2164_B)
-        {
-            rhd2164ChipPresent = true;
-        }
-    }
-
-    if (channel >= 32 && !rhd2164ChipPresent)
-    {
-        cout << "Selected channel = " << channel << " but a 64-channel "
-                "chip was not detected." << endl;
-        return -1 ;
-    }
 
     if (!impedanceConfigured)
     {
         cout << "You must configure the impedance measurement "
                 "before measuring impedance." << endl;
+        return -1;
+    }
+
+    if (!channelSelected)
+    {
+        cout << "You must select a channel to test before measuring "
+                "impedance." << endl;
         return -1;
     }
 
@@ -218,7 +248,6 @@ int Rhd2000Impedance::measureImpedance(int channel)
             break;
         }
 
-        chipRegisters->setZcheckChannel(channel);
         commandSequenceLength =
                 chipRegisters->createCommandListRegisterConfig(commandList, false);
 
@@ -353,7 +382,7 @@ int Rhd2000Impedance::measureImpedance(int channel)
     // Switch back to flatline
     evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd1, 0);
     evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1, 0, 59);
-    evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::PortA, Rhd2000EvalBoard::AuxCmd3, 1);
+    evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 1);
 
     // Turn off LED.
     ttlOut[15] = 0;
@@ -363,13 +392,13 @@ int Rhd2000Impedance::measureImpedance(int channel)
     return 0;
 }
 
-// Measure the impedance on all channels
-int Rhd2000Impedance::measureImpedance(int channel, double Fs)
+// Measure the impedance on selected channel at selected frequency
+int Rhd2000Impedance::measureImpedance(double Fs)
 {
     // Switch to desired impedance test frequency, generate
     // the test signal, and test impedance
     changeImpedanceFrequency(Fs);
-    return measureImpedance(channel);
+    return measureImpedance();
 }
 
 // Public method for changing impedance test signal frequency
@@ -385,7 +414,7 @@ void Rhd2000Impedance::changeImpedanceFrequency(double Fs)
 
 }
 
-void Rhd2000Impedance::printImpedance(int channel)
+void Rhd2000Impedance::printImpedance()
 {
 
     // Construct channel name
@@ -453,7 +482,7 @@ void Rhd2000Impedance::setupEvalBoard()
 void Rhd2000Impedance::setupAmplifier()
 {
 
-    int delay, stream, id, i, channel, auxName, vddName;
+    int delay, stream, id, i, auxName, vddName;
     int register59Value;
     int numChannelsOnPort = 0;
     QVector<int> portIndex, portIndexOld, chipIdOld;
@@ -682,26 +711,26 @@ void Rhd2000Impedance::setupAmplifier()
         signalSources->signalPort[usedPort].channel.clear();
 
         // ...and create new ones.
-        channel = 0;
+        int channelIdx = 0;
 
         // Create amplifier channels for each chip.
         for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
             if (portIndex[stream] == usedPort) {
                 if (chipId[stream] == CHIP_ID_RHD2216) {
                     for (i = 0; i < 16; ++i) {
-                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channelIdx++, i, stream);
                     }
                 } else if (chipId[stream] == CHIP_ID_RHD2132) {
                     for (i = 0; i < 32; ++i) {
-                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channelIdx++, i, stream);
                     }
                 } else if (chipId[stream] == CHIP_ID_RHD2164) {
                     for (i = 0; i < 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
-                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channelIdx++, i, stream);
                     }
                 } else if (chipId[stream] == CHIP_ID_RHD2164_B) {
                     for (i = 0; i < 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
-                        signalSources->signalPort[usedPort].addAmplifierChannel(channel++, i, stream);
+                        signalSources->signalPort[usedPort].addAmplifierChannel(channelIdx++, i, stream);
                     }
                 }
             }
@@ -727,7 +756,7 @@ void Rhd2000Impedance::setupAmplifier()
     {    // If number of channels on port has not changed, don't create new channels (since this
         // would clear all user-defined channel names.  But we must update the data stream indices
         // on the port.
-        channel = 0;
+        int channelIdx = 0;
         // Update stream indices for amplifier channels.
         for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
             if (portIndex[stream] == usedPort) {
@@ -737,20 +766,20 @@ void Rhd2000Impedance::setupAmplifier()
                     }
                     channel += 16;
                 } else if (chipId[stream] == CHIP_ID_RHD2132) {
-                    for (i = channel; i < channel + 32; ++i) {
+                    for (i = channelIdx; i < channelIdx + 32; ++i) {
                         signalSources->signalPort[usedPort].channel[i].boardStream = stream;
                     }
-                    channel += 32;
+                    channelIdx += 32;
                 } else if (chipId[stream] == CHIP_ID_RHD2164) {
-                    for (i = channel; i < channel + 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
+                    for (i = channelIdx; i < channelIdx + 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
                         signalSources->signalPort[usedPort].channel[i].boardStream = stream;
                     }
-                    channel += 32;
+                    channelIdx += 32;
                 } else if (chipId[stream] == CHIP_ID_RHD2164_B) {
-                    for (i = channel; i < channel + 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
+                    for (i = channelIdx; i < channelIdx + 32; ++i) {  // 32 channels on MISO A; another 32 on MISO B
                         signalSources->signalPort[usedPort].channel[i].boardStream = stream;
                     }
-                    channel += 32;
+                    channelIdx += 32;
                 }
             }
         }
@@ -760,10 +789,10 @@ void Rhd2000Impedance::setupAmplifier()
                 if (chipId[stream] == CHIP_ID_RHD2216 ||
                         chipId[stream] == CHIP_ID_RHD2132 ||
                         chipId[stream] == CHIP_ID_RHD2164) {
-                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
-                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
-                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
-                    signalSources->signalPort[usedPort].channel[channel++].boardStream = stream;
+                    signalSources->signalPort[usedPort].channel[channelIdx++].boardStream = stream;
+                    signalSources->signalPort[usedPort].channel[channelIdx++].boardStream = stream;
+                    signalSources->signalPort[usedPort].channel[channelIdx++].boardStream = stream;
+                    signalSources->signalPort[usedPort].channel[channelIdx++].boardStream = stream;
                 }
             }
         }
@@ -1020,7 +1049,40 @@ void Rhd2000Impedance::empiricalResistanceCorrection(double &impedanceMagnitude,
 
 
 
+void Rhd2000Impedance::plate(float currentuA, double durationSec) {
 
+    // Make sure that a channel has been selected for plating
+    if (!channelSelected)
+    {
+        cout << "You must select a channel to test before plating." << endl;
+        return -1;
+    }
+
+    // Tell the plating object what headstage to aim at
+    plateControl->selectHeadstage(usedPort); //TODO: this is wrong I think because ports can have two headstages.
+
+    // Update plating parameters in the platecontrol object
+    plateControl->setPlateParameters(currentuA, durationSec);
+
+    // Power up the DAC used for plating control
+    evalBoard->enableDac(plateControl->dacNumber, true);
+
+    // Configure the plate start bit
+    plateControl->turnPlatingOn();
+
+    // Write the ttl configutation to the evalboard
+    evalBoard->setTtlOut(plateControl->getTTLState());
+
+    // Apply the requested plating delay
+    plateControl->applyPlatingDelay();
+
+    // Configure the plate stop bit
+    plateControl->turnPlatingOff();
+
+    // End the plating session
+    evalBoard->setTtlOut(plateControl->getTTLState());
+
+}
 
 
 

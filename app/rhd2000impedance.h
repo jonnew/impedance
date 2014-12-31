@@ -6,6 +6,7 @@
 #include "rhd2000evalboard.h"
 #include "rhd2000registers.h"
 #include "rhd2000datablock.h"
+#include "platecontrol.h"
 
 // Included class objects
 class Rhd2000EvalBoard;
@@ -14,6 +15,7 @@ class Rhd2000Registers;
 class SignalSources;
 class SignalGroup;
 class SignalChannel;
+class PlateControl;
 
 using namespace std;
 
@@ -28,6 +30,7 @@ public:
     // User-twidlable
     void setupEvalBoard();
     void setupAmplifier();
+    void selectChannel(int selectedChannel);
     void configureImpedanceMeasurement();
     void changeImpedanceFrequency(double Fs);
     int measureImpedance();
@@ -37,6 +40,7 @@ public:
 
     // This structure exposes all channel information and impedance results
     SignalSources *signalSources;
+
 
 private:
 
@@ -92,12 +96,17 @@ private:
     unsigned int numUsbBlocksToRead;
 
     // Parameters and data used to derive impedance measurements
+    int channel;
     bool impedanceConfigured;
+    bool channelSelected;
     int numPeriods;
     int numBlocks;
     double relativePeriod;
     QVector<QVector<QVector<double> > > measuredMagnitude;
     QVector<QVector<QVector<double> > > measuredPhase;
+
+    // Plating
+    PlateControl *plateControl;
 
     // Data file stuff (this will be changed/removed)
     SaveFormat saveFormat;

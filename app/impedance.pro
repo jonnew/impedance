@@ -25,7 +25,7 @@ SOURCES += main.cpp \
     randomnumber.cpp \
     signalgroup.cpp \
     signalsources.cpp \
-    rhd2000evalboardplatecontrol.cpp
+    platecontrol.cpp
 
 OTHER_FILES += \
     okFrontPanel.dll \
@@ -44,4 +44,4 @@ HEADERS += \
     signalgroup.h \
     signalsources.h \
     qtinclude.h \
-    rhd2000evalboardplatecontrol.h
+    platecontrol.h

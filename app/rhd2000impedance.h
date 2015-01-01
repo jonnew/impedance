@@ -28,12 +28,8 @@ public:
     Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port);
 
     // User-twidlable
-    void setupEvalBoard(void);
-    void setupAmplifier(void);
     int selectChannel(int selectedChannel);
-    void configureImpedanceMeasurement(void);
     void changeImpedanceFrequency(double Fs);
-    //int measureAllImpedances(void);
     int measureImpedance(void);
     int measureImpedance(double Fs);
     void printImpedance(void);
@@ -48,8 +44,15 @@ public:
 private:
 
     // Private functions
+    void setupEvalBoard(void);
+    void setupAmplifier(void);
+    void setupImpedanceTest(void);
+    void generateAuxCmds(void);
+
+
+
     void changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs);
-    //void createCommands();
+    void performADCSelfCalibration(void);
     void updateImpedanceFrequency();
     int deviceId(Rhd2000DataBlock *dataBlock, int stream, int &register59Value);
     void factorOutParallelCapacitance(double &impedanceMagnitude,
@@ -90,7 +93,9 @@ private:
     bool impedanceFreqValid;
     double cableLengthMeters;
     double boardSampleRate;
-    int commandSequenceLength;
+    int impedanceTestSamples;
+    int auxCmd1SequenceLength;
+    int auxCmd3SequenceLength;
 
     // Data structs
     int ttlOut[16];
@@ -105,6 +110,8 @@ private:
     bool channelSelected;
     int numPeriods;
     int numBlocks;
+    int numSettleBlocks;
+    int numSettlePeriods;
     double relativePeriod;
     QVector<QVector<QVector<double> > > measuredMagnitude;
     QVector<QVector<QVector<double> > > measuredPhase;

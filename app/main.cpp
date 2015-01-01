@@ -29,42 +29,45 @@ using namespace std;
 int main(int argc, char *argv[])
 {
     Rhd2000Impedance *impedance = new Rhd2000Impedance(Rhd2000EvalBoard::PortA);
-    impedance->setupEvalBoard();
-    impedance->setupAmplifier();
-    impedance->configureImpedanceMeasurement();
+
+
+    //impedance->selectChannel(5);
+    //impedance->measureImpedance();
+    //impedance->printImpedance();
+
+
 
     // TODO User settable protocol parameters (channels to test/plate)
-    for (int ch=1; ch < 32; ch++) {
+    for (int ch=0; ch < 32; ch++) {
 
         impedance->selectChannel(ch);
 
         // Clean electrode and apply initial plating
         // TODO: User settable protocol parameters (plating times, plating currents)
-        impedance->plate(0.1,1000);
-        impedance->plate(-0.05,15000);
-
+        //impedance->plate(0.1,1000);
+        //impedance->plate(-0.05,1000);
 
         impedance->measureImpedance();
         impedance->printImpedance();
 
 
-        // While the impedance of the electrode is not within the desired range
-        // TODO: User settable protocol parameters (target, threshold, plating times, plating currents)
-        while (abs(impedance->getImpedanceMagnitude() - 470e3) > 50e3) {
+//        // While the impedance of the electrode is not within the desired range
+//        // TODO: User settable protocol parameters (target, threshold, plating times, plating currents)
+//        while (abs(impedance->getImpedanceMagnitude() - 470e3) > 50e3) {
 
-            if (impedance->getImpedanceMagnitude() - 470e3 > 0) {
+//            if (impedance->getImpedanceMagnitude() - 470e3 > 0) {
 
-                // If the impedance is too high
-                impedance->plate(-0.05, 3000);
-            }
-            else {
+//                // If the impedance is too high
+//                impedance->plate(-0.05, 3000);
+//            }
+//            else {
 
-                // If the impedance is too low
-                impedance->plate(0.05, 1000);
-            }
+//                // If the impedance is too low
+//                impedance->plate(0.05, 1000);
+//            }
 
-            impedance->measureImpedance();
-            impedance->printImpedance();
-        }
+//            impedance->measureImpedance();
+//            impedance->printImpedance();
+//        }
     }
 }

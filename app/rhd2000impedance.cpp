@@ -149,9 +149,13 @@ void Rhd2000Impedance::configureImpedanceMeasurement()
 
     // Determine the longest command sequence to ensure that all evalBoard->run()
     // calls will go for that many cycles
-    commandSequenceLength = max(command1SequenceLength,command3SequenceLength);
-    evalBoard->setMaxTimeStep(commandSequenceLength);
+    //commandSequenceLength = command1SequenceLength;
+    evalBoard->setMaxTimeStep(command1SequenceLength);
     evalBoard->setContinuousRunMode(false);
+
+    // TODO: Do I need to redo this for every change in board sampling rate?
+    // going through the delay finding step is calling then uncalling then calling
+    // this routine!!!
 
     // Calibrate the ADC
     cout << "Calibrating the ADC...";

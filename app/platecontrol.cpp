@@ -1,13 +1,18 @@
 #include "platecontrol.h"
 #include "qtinclude.h"
 
+using namespace std;
+
 PlateControl::PlateControl(int plateControlDAC,
+                           double currentGainuAPerVolt,
                            int plateTriggerBit,
                            int platePolarityBit,
                            int headStageSelectBit0)
 {
-    // Select the DAC used to control the current or voltage source
+    // Select the DAC used to control the current or voltage source and provide
+    // the uA/V selection
     dacNumber = plateControlDAC;
+    uAPerVolt = currentGainuAPerVolt;
 
     // Select the digital control lines
     plateBit = plateTriggerBit;
@@ -33,7 +38,7 @@ int PlateControl::selectHeadstage(int headstageNumber) {
         return 0;
     }
     else {
-        cerr << "Invalid headstage selection. Please choose a headstage between 0 and 3.";
+        cout << "Invalid headstage selection. Please choose a headstage between 0 and 3." << endl;;
         return -1;
     }
 
@@ -53,7 +58,7 @@ void PlateControl::setPolarity(bool polarity) {
 
 }
 
-int PlateControl::setPlateParameters(double currentuA, double durationSec) {
+int PlateControl::setPlateParameters(double currentuA, unsigned long durationMilliSec) {
 
     // Set the polarity
     if (currentuA < 0) {
@@ -65,11 +70,11 @@ int PlateControl::setPlateParameters(double currentuA, double durationSec) {
 
     // Set the DAC voltage
     currentuA = abs(currentuA);
-    dacVoltage = 32767 + qFloor((32768/3.3) * currentuA/uAPerVolt);
-    plateDurationUSec = durationSec * 1e6;
+    dacVoltage = 32768 + qFloor((32768/3.3) * currentuA/uAPerVolt);
+    plateDurationMilliSec = durationMilliSec;
 
     if (dacVoltage > 65536) {
-        dacVolt = 65536;
+        dacVoltage = 65536;
         cerr << "The requested plating current is too high. It has been set to the max value." << endl;
         return -1;
     }
@@ -81,7 +86,7 @@ int PlateControl::setPlateParameters(double currentuA, double durationSec) {
 }
 
 void PlateControl::applyPlatingDelay(){
-    usleep(plateDurationUSec);
+    QThread::msleep(plateDurationMilliSec);
 }
 
 void PlateControl::turnPlatingOn() {
@@ -93,13 +98,12 @@ void PlateControl::turnPlatingOff() {
 }
 
 // Get the current TTL state in the format required by the Rhythm driver
-int* PlateControl::getTTLState() {
+int* PlateControl::getTTLState(int ttlState[]) {
 
 
     // Turn the TTL int into an array
-    int ttlState[16];
     for (int i=0; i < 16; i++) {
-        ttlState[i] = (0x0001 & (ttl << i));
+        ttlState[i] = (1 & (ttl >> i));
     }
 
     return ttlState;

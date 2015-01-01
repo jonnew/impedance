@@ -28,15 +28,18 @@ public:
     Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port);
 
     // User-twidlable
-    void setupEvalBoard();
-    void setupAmplifier();
-    void selectChannel(int selectedChannel);
-    void configureImpedanceMeasurement();
+    void setupEvalBoard(void);
+    void setupAmplifier(void);
+    int selectChannel(int selectedChannel);
+    void configureImpedanceMeasurement(void);
     void changeImpedanceFrequency(double Fs);
-    int measureImpedance();
-    int measureImpedance(int channel);
-    int measureImpedance(int channel, double Fs);
-    void printImpedance(int channel);
+    //int measureAllImpedances(void);
+    int measureImpedance(void);
+    int measureImpedance(double Fs);
+    void printImpedance(void);
+    double getImpedancePhase(void);
+    double getImpedanceMagnitude(void);
+    int plate(double currentuA, unsigned long durationMilliSec);
 
     // This structure exposes all channel information and impedance results
     SignalSources *signalSources;
@@ -87,6 +90,7 @@ private:
     bool impedanceFreqValid;
     double cableLengthMeters;
     double boardSampleRate;
+    int commandSequenceLength;
 
     // Data structs
     int ttlOut[16];

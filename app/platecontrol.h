@@ -13,19 +13,19 @@ public:
                  int headStageSelectBit0);
 
     // Plating control methods
-    void turnPlatingOn();
-    void turnPlatingOff();
-    void applyPlatingDelay();
+    void turnPlatingOn(void);
+    void turnPlatingOff(void);
+    void applyPlatingDelay(void);
 
     // Plating parameters
-    int setPlateParameters(double currentuA, double durationSec);
+    int setPlateParameters(double currentuA, unsigned long durationMilliSec);
     int selectHeadstage(int headstageNumber);
 
     // Get the nessesary information for writing to digital and analog
     // channels on eval board
     int dacNumber;
     int dacVoltage;
-    double plateDurationUSec;
+    unsigned long plateDurationMilliSec;
     int* getTTLState(int ttlState[]);
 
 

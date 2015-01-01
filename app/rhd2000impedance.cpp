@@ -46,7 +46,7 @@ Rhd2000Impedance::Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port)
     chipRegisters = new Rhd2000Registers(boardSampleRate);
 
     // Create plating control object
-    plateControl = new PlateControl(0, 0.1, 0, 1, 2);
+    plateControl = new PlateControl(0, 0.1/3.3, 0, 1, 2);
 
     // Set default filter freqs
     notchFilterFrequency = 60.0;
@@ -61,7 +61,7 @@ Rhd2000Impedance::Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port)
     chipId.resize(MAX_NUM_DATA_STREAMS);
     chipId.fill(-1);
 
-    // Zero digital outs
+    //Create a shared array for controlling digital lines. them.
     for (int i = 0; i < 16; ++i) {
         ttlOut[i] = 0;
     }
@@ -69,51 +69,116 @@ Rhd2000Impedance::Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port)
     cout << "done." << endl;
 }
 
+//void Rhd2000Impedance::GenerateAuxCommands() {
+
+//}
+
+// Create auxiliary commands required to perform impedance testing
 void Rhd2000Impedance::configureImpedanceMeasurement()
 {
 
-    // Disable external fast settling, since this interferes with DAC commands in AuxCmd1.
-    evalBoard->enableExternalFastSettle(false);
-
-    // Disable auxiliary digital output control during impedance measurements.
-    evalBoard->enableExternalDigOut(usedPort, false);
-
-    // Create a fresh chipRegisters instance
+    // Update the chipregister object with the board sample rate and ensure
+    // the DSP is on
     chipRegisters->defineSampleRate(boardSampleRate);
-    vector<int> commandList;
-    int commandSequenceLength;
+    chipRegisters->enableDsp(dspEnabled);
 
-    // Create a command list for the AuxCmd1 slot defining a sine wave at the
-    // selected impedance test waveform frequency
-    commandSequenceLength =
+    // Temp variables to hold aux commands
+    vector<int> commandList;
+    int command1SequenceLength, command3SequenceLength;
+
+    // Create a command list for the AuxCmd1 slot defining either DC or a sine wave
+    // at the selected impedance test waveform frequency
+
+    // AuxCmd1, Bank 0 : DC output to reduce noise
+    // NOTE: Because the frequency of this waveform is 0 Hz, it will
+    // occupy all 1024 samples allotted for a given command sequence.
+    // Don't use this length to determine the evalboard->run() time!
+    chipRegisters->createCommandListZcheckDac(commandList, 0, 0);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd1, 0);
+
+    // AuxCmd1, Bank 1 : sine wave at impedance test frequency
+    command1SequenceLength =
             chipRegisters->createCommandListZcheckDac(commandList, actualImpedanceFreq, 128.0);
     evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd1, 1);
-    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1,
-                                      0, commandSequenceLength - 1);
-    evalBoard->selectAuxCommandBank(usedPort,
-                                    Rhd2000EvalBoard::AuxCmd1, 1);
 
-    // Select number of periods to measure impedance over
-    numPeriods = qRound(0.020 * actualImpedanceFreq); // Test each channel for at least 20 msec...
-    if (numPeriods < 5) numPeriods = 5; // ...but always measure across no fewer than 5 complete periods
-    relativePeriod = boardSampleRate / actualImpedanceFreq;
-    numBlocks = qCeil((numPeriods + 2.0) * relativePeriod / 60.0);  // + 2 periods to give time to settle initially
-    if (numBlocks < 2) numBlocks = 2;   // need first block for command to switch channels to take effect.
+    // Default selected bank to the DC output
+    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1,
+                                      0, command1SequenceLength - 1);
+    evalBoard->selectAuxCommandBank(usedPort,Rhd2000EvalBoard::AuxCmd1, 0);
+
+    // For the AuxCmd3 slot, we will create two command sequences. Both sequences
+    // will configure and read back the RHD2000 chip registers, but one sequence will
+    // also run ADC calibration.
+    // Before generating register configuration command sequences, set amplifier
+    // bandwidth paramters.
 
     // Update filter settings etc
     actualDspCutoffFreq = chipRegisters->setDspCutoffFreq(desiredDspCutoffFreq);
     actualLowerBandwidth = chipRegisters->setLowerBandwidth(desiredLowerBandwidth);
     actualUpperBandwidth = chipRegisters->setUpperBandwidth(desiredUpperBandwidth);
-    chipRegisters->enableDsp(dspEnabled);
+
+    // AuxCmd3, Bank 0: ADC calibration
+    command3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, true);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 0);
+
+    // AuxCmd3, Bank 1: No calibration
+    command3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, true);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 1);
+
+    // AuxCmd3, Bank 2: No calibration, 100fF series cap for zcheck, zcheck enabled
     chipRegisters->enableZcheck(true);
-    commandSequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, false);
+    chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs100fF);
+    command3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, true);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 2);
 
-    // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
+    // AuxCmd3, Bank 3: No calibration, 1pF series cap for zcheck, zcheck enabled
+    chipRegisters->enableZcheck(true);
+    chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs1pF);
+    command3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, true);
     evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
-    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd3, 0, commandSequenceLength - 1);
-    evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 3);
 
+    // AuxCmd3, Bank 4: No calibration, 10pF series cap for zcheck, zcheck enabled
+    chipRegisters->enableZcheck(true);
+    chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs10pF);
+    command3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, true);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 4);
+    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd3, 0, command3SequenceLength - 1);
+
+    // Select RAM Bank 1 for AuxCmd3 initially, so the ADC is calibrated.
+    evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 0);
+
+    // Determine the longest command sequence to ensure that all evalBoard->run()
+    // calls will go for that many cycles
+    commandSequenceLength = max(command1SequenceLength,command3SequenceLength);
+    evalBoard->setMaxTimeStep(commandSequenceLength);
     evalBoard->setContinuousRunMode(false);
+
+    // Calibrate the ADC
+    cout << "Calibrating the ADC...";
+
+    // Set the number of run cycles to the larger of the two command sequences
+    evalBoard->run(); // Wait for the 60-sample run to complete.
+    while (evalBoard->isRunning()) { }
+
+    cout << "done." << endl;
+
+    // Read the resulting single data block from the USB interface.
+    Rhd2000DataBlock *dataBlock = new Rhd2000DataBlock(evalBoard->getNumEnabledDataStreams());
+    evalBoard->readDataBlock(dataBlock);
+
+    // Display register contents from data stream 0.
+    dataBlock->print(0);
+
+    // Now that calibration is complete, we must set the number of cycles to match
+    // amount of time it takes to produce the impedance test waveform
+    // TODO: I actually do not understand how this works!!!!
+    numPeriods = qRound(0.020 * actualImpedanceFreq); // Test each channel for at least 20 msec...
+    if (numPeriods < 5) numPeriods = 5; // ...but always measure across no fewer than 5 complete periods
+    relativePeriod = boardSampleRate / actualImpedanceFreq;
+    numBlocks = qCeil((numPeriods + 2.0) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 2 periods to give time to settle initially
+    if (numBlocks < 2) numBlocks = 2;   // need first block for command to switch channels to take effect.
+
+    // All subsequence calls to evalBoard->run() will last for this many cycles
     evalBoard->setMaxTimeStep(SAMPLES_PER_DATA_BLOCK * numBlocks);
 
     // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
@@ -141,6 +206,7 @@ void Rhd2000Impedance::configureImpedanceMeasurement()
 int Rhd2000Impedance::selectChannel(int selectedChannel) {
 
     // Check to see if the 64 channel chip is present
+    int stream;
     bool rhd2164ChipPresent = false;
     for (stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream)
     {
@@ -166,34 +232,6 @@ int Rhd2000Impedance::selectChannel(int selectedChannel) {
     chipRegisters->setZcheckChannel(channel);
     channelSelected = true;
 
-}
-
-// Cycle through 32 channels to measure impedance
-int Rhd2000Impedance::measureAllImpedances() {
-
-    // Turn LEDs on to indicate that data acquisition is running.
-    ttlOut[15] = 1;
-    int ledArray[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-    int ledIndex = 0;
-    evalBoard->setLedDisplay(ledArray);
-
-    // Single channel data collection and processing here.
-    // TODO: This does not account for the fact that a 64 channel headstage
-    // can be plugged in!
-    for (int channelIdx = 0; channelIdx < 32; ++channelIdx)
-    {
-        selectChannel(channelIdx);
-        measureImpedance();
-    }
-
-    // Advance LED display
-    ledArray[ledIndex] = 0;
-    ledIndex++;
-    if (ledIndex == 8) ledIndex = 0;
-    ledArray[ledIndex] = 1;
-    evalBoard->setLedDisplay(ledArray);
-
-    // Success
     return 0;
 
 }
@@ -202,9 +240,8 @@ int Rhd2000Impedance::measureAllImpedances() {
 int Rhd2000Impedance::measureImpedance()
 {
     // Stuff we will need to do the measurements
-    int commandSequenceLength, stream, capRange;
+    int stream, capRange;
     double cSeries;
-    vector<int> commandList;
     int triggerIndex;                       // dummy reference variable; not used
     queue<Rhd2000DataBlock> bufferQueue;    // dummy reference variable; not used
 
@@ -223,11 +260,6 @@ int Rhd2000Impedance::measureImpedance()
         return -1;
     }
 
-    // Gate ttlOut_15 to indicate that we are performing an impedance sweep
-    // on a single channel
-    //ttlOut[15] = 1;
-    //evalBoard->setTtlOut(ttlOut);
-
     // We execute three complete electrode impedance measurements: one each with
     // Cseries set to 0.1 pF, 1 pF, and 10 pF.  Then we select the best measurement
     // for each channel so that we achieve a wide impedance measurement range.
@@ -235,26 +267,24 @@ int Rhd2000Impedance::measureImpedance()
     {
         switch (capRange) {
         case 0:
-            chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs100fF);
+            evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 2);
             cSeries = 0.1e-12;
             break;
         case 1:
-            chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs1pF);
+            evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 3);
             cSeries = 1.0e-12;
             break;
         case 2:
-            chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs10pF);
+            evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 4);
             cSeries = 10.0e-12;
             break;
         }
 
-        commandSequenceLength =
-                chipRegisters->createCommandListRegisterConfig(commandList, false);
-
-        // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
-        evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
+        // Select AuxCmd1 with the sine wave impedance test waveform
+        evalBoard->selectAuxCommandBank(usedPort,Rhd2000EvalBoard::AuxCmd1, 1);
 
         // Run the test signal, collect the data
+        // TODO: Is this thing actually running for the correct number of periods??
         evalBoard->run();
         while (evalBoard->isRunning() ) { }
 
@@ -380,13 +410,10 @@ int Rhd2000Impedance::measureImpedance()
     evalBoard->flush();
 
     // Switch back to flatline
+    // TODO: is the first command overwritten?
     evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd1, 0);
     evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1, 0, 59);
     evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd3, 1);
-
-    // Turn off LED.
-    ttlOut[15] = 0;
-    evalBoard->setTtlOut(ttlOut);
 
     // Success
     return 0;
@@ -417,6 +444,13 @@ void Rhd2000Impedance::changeImpedanceFrequency(double Fs)
 void Rhd2000Impedance::printImpedance()
 {
 
+    if (!channelSelected) {
+        cout << "Channel has not been selected, so a impedance results cannot "
+                "be printed." << endl;
+
+        return;
+    }
+
     // Construct channel name
     SignalChannel *signalChannel;
 
@@ -436,10 +470,74 @@ void Rhd2000Impedance::printImpedance()
         break;
     }
 
-   // cout << "* " << signalChannel->nativeChannelName <<" Impedance Results *" << endl;
+    cout << "   Channel: " << channel << endl;
     cout << "   Test freq. (Hz): " <<  actualImpedanceFreq << endl;
     cout << "   Magnitude (ohms): " << signalChannel->electrodeImpedanceMagnitude << endl;
     cout << "   Phase (deg.): " << signalChannel->electrodeImpedancePhase << endl;
+}
+
+double Rhd2000Impedance::getImpedanceMagnitude() {
+
+    if (!channelSelected) {
+        cout << "Channel has not been selected, so a impedance magnitude measurement "
+                "cannot be returned." << endl;
+
+        return std::numeric_limits<double>::quiet_NaN();;
+    }
+
+    // Construct channel name
+    SignalChannel *signalChannel;
+
+    switch (usedPort)
+    {
+    case Rhd2000EvalBoard::PortA :
+        signalChannel = &signalSources->signalPort[0].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortB :
+        signalChannel = &signalSources->signalPort[1].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortC :
+        signalChannel = &signalSources->signalPort[2].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortD :
+        signalChannel = &signalSources->signalPort[3].channel[channel];
+        break;
+    }
+
+    return signalChannel->electrodeImpedanceMagnitude;
+
+}
+
+double Rhd2000Impedance::getImpedancePhase() {
+
+    if (!channelSelected) {
+        cout << "Channel has not been selected, so a impedance phase measurement "
+                "cannot be returned." << endl;
+
+        return std::numeric_limits<double>::quiet_NaN();;
+    }
+
+    // Construct channel name
+    SignalChannel *signalChannel;
+
+    switch (usedPort)
+    {
+    case Rhd2000EvalBoard::PortA :
+        signalChannel = &signalSources->signalPort[0].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortB :
+        signalChannel = &signalSources->signalPort[1].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortC :
+        signalChannel = &signalSources->signalPort[2].channel[channel];
+        break;
+    case Rhd2000EvalBoard::PortD :
+        signalChannel = &signalSources->signalPort[3].channel[channel];
+        break;
+    }
+
+    return signalChannel->electrodeImpedancePhase;
+
 }
 
 // This function loads the Intan firmware to the evaluation board and scans port
@@ -473,6 +571,19 @@ void Rhd2000Impedance::setupEvalBoard()
 
     // Initialize board.
     evalBoard->initialize();
+
+    // Set the ttlMode to manual and clear the digital lines
+    evalBoard->setTtlMode(0);
+    evalBoard->clearTtlOut();
+
+    // Set sample rate. 20000 Hz is a good choice for impedance testing
+    changeSampleRate(Rhd2000EvalBoard::SampleRate20000Hz);
+
+    // Disable external fast settling, since this interferes with DAC commands in AuxCmd1.
+    evalBoard->enableExternalFastSettle(false);
+
+    // Disable auxiliary digital output control during impedance measurements.
+    evalBoard->enableExternalDigOut(usedPort, false);
 
     cout << "Evaluation board initialization successful." << endl;
 }
@@ -841,6 +952,11 @@ void Rhd2000Impedance::changeSampleRate(Rhd2000EvalBoard::AmplifierSampleRate Fs
         break;
     }
 
+//    TODO: THIS SECTION OF CODE IS HIGHLY REDUNDANT WITH THE IMPEDANCE CONFIGURATION
+//            CODE. IDEALLY, THERE SHOULD BE A CHIP CALIBRATION ROUTINE ANYTIME A 'HARDWARE'
+//            PARAMETER IS CHANGED (E.G. BOARD SAMPLE RATE) AND AN IMPEDANCE CONFIGURATION
+//            FOR WHEN AN IMPEDANCE PARAMETER IS CHANGED (E.G. TEST FREQUENCY)
+
     // Set up an RHD2000 register object using this sample rate to
     // optimize MUX-related register settings.
     chipRegisters->defineSampleRate(boardSampleRate);
@@ -1048,13 +1164,12 @@ void Rhd2000Impedance::empiricalResistanceCorrection(double &impedanceMagnitude,
 }
 
 
-
-void Rhd2000Impedance::plate(float currentuA, double durationSec) {
+int Rhd2000Impedance::plate(double currentuA, unsigned long durationMilliSec) {
 
     // Make sure that a channel has been selected for plating
     if (!channelSelected)
     {
-        cout << "You must select a channel to test before plating." << endl;
+        cout << "You must select a channel before plating." << endl;
         return -1;
     }
 
@@ -1062,25 +1177,44 @@ void Rhd2000Impedance::plate(float currentuA, double durationSec) {
     plateControl->selectHeadstage(usedPort); //TODO: this is wrong I think because ports can have two headstages.
 
     // Update plating parameters in the platecontrol object
-    plateControl->setPlateParameters(currentuA, durationSec);
+    plateControl->setPlateParameters(currentuA, durationMilliSec);
 
-    // Power up the DAC used for plating control
+    // Power up the DAC used for plating control. The gate from the plating source
+    // to the electrode will not be opened until the ttl lines are set
+    evalBoard->clearTtlOut();
     evalBoard->enableDac(plateControl->dacNumber, true);
+    evalBoard->selectDacDataStream(plateControl->dacNumber, 8);
+    evalBoard->setDacManual(plateControl->dacVoltage);
 
     // Configure the plate start bit
     plateControl->turnPlatingOn();
 
     // Write the ttl configutation to the evalboard
-    evalBoard->setTtlOut(plateControl->getTTLState());
+    plateControl->getTTLState(ttlOut);
+    evalBoard->setTtlOut(ttlOut);
 
     // Apply the requested plating delay
-    plateControl->applyPlatingDelay();
+    //plateControl->applyPlatingDelay();
+
+    evalBoard->setMaxTimeStep(evalBoard->getSampleRate()*plateControl->plateDurationMilliSec/1000);
+    evalBoard->run();
+    while (evalBoard->isRunning()) {}
+
+    evalBoard->setMaxTimeStep(1);
+    evalBoard->setDacManual(0);
+    evalBoard->run();
+    while (evalBoard->isRunning()) {}
+
+    evalBoard->enableDac(plateControl->dacNumber, false);
 
     // Configure the plate stop bit
     plateControl->turnPlatingOff();
 
     // End the plating session
-    evalBoard->setTtlOut(plateControl->getTTLState());
+    plateControl->getTTLState(ttlOut);
+    evalBoard->setTtlOut(ttlOut);
+
+    return 0;
 
 }
 

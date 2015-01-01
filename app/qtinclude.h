@@ -11,8 +11,9 @@
 #include <QTime>
 #include <qmath.h>
 #include <QVector>
+#include <QThread>
 #include <iostream>
-#include <time.h>
+
 
 
 #endif // QTINCLUDE_H

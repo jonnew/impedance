@@ -1,6 +1,7 @@
-#ifndef RHD2000IMPEDANCE_H
-#define RHD2000IMPEDANCE_H
+#ifndef RHD2000EVALBOARDIMPEDANCETESTER_H
+#define RHD2000EVALBOARDIMPEDANCETESTER_H
 
+#include "rhd2000evalboardimpedancetester_global.h"
 #include "globalconstants.h"
 #include "signalprocessor.h"
 #include "rhd2000evalboard.h"
@@ -19,10 +20,11 @@ class PlateControl;
 
 using namespace std;
 
-class RHD2000Impedance
+class RHD2000EVALBOARDIMPEDANCETESTERSHARED_EXPORT RHD2000Impedance
 {
 
 public:
+    RHD2000Impedance();
 
     // Imdepdance measurement class
     RHD2000Impedance(Rhd2000EvalBoard::BoardPort port);
@@ -122,8 +124,6 @@ private:
     // Data file stuff (this will be changed/removed)
     SaveFormat saveFormat;
     QDataStream *saveStream;
-
-
 };
 
-#endif // RHD2000IMPEDANCE_H
+#endif // RHD2000EVALBOARDIMPEDANCETESTER_H

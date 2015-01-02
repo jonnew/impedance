@@ -28,7 +28,7 @@ using namespace std;
 
 int main(int argc, char *argv[])
 {
-    RHD2000Impedance *impedance = new RHD2000Impedance(Rhd2000EvalBoard::PortA);
+    RHD2000EvalBoardImpedanceTester *impedance = new RHD2000EvalBoardImpedanceTester(Rhd2000EvalBoard::PortA);
 
 
     //impedance->selectChannel(5);

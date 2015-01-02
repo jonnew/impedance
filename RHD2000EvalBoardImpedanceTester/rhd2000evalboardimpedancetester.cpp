@@ -1,4 +1,4 @@
-#include "rhd2000impedance.h"
+#include "rhd2000evalboardimpedancetester.h"
 #include "rhd2000evalboard.h"
 #include "rhd2000registers.h"
 #include "rhd2000datablock.h"
@@ -13,8 +13,9 @@
 
 using namespace std;
 
-RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
-{
+
+RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port) {
+
     // Initialized default parameters
     cout << "Intializing internal default parameters...";
 
@@ -77,6 +78,7 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
 
     cout << "done." << endl;
 }
+
 
 // Create auxiliary commands required to perform impedance testing. This function
 // must be run anytime there is a change in the impedance test frequency.
@@ -1278,18 +1280,6 @@ int RHD2000Impedance::plate(double currentuA, unsigned long durationMilliSec) {
     return 0;
 
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

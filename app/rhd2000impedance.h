@@ -31,7 +31,6 @@ public:
     int selectChannel(int selectedChannel);
     void changeImpedanceFrequency(double Fs);
     int measureImpedance(void);
-    int measureImpedance(double Fs);
     void printImpedance(void);
     double getImpedancePhase(void);
     double getImpedanceMagnitude(void);
@@ -48,6 +47,7 @@ private:
     void setupAmplifier(void);
     void setupImpedanceTest(void);
     void generateAuxCmds(void);
+    void generateAuxCmd3(void);
 
 
 

@@ -83,6 +83,7 @@ Rhd2000Impedance::Rhd2000Impedance(Rhd2000EvalBoard::BoardPort port)
 // Create auxiliary commands required to perform impedance testing. This function
 // must be run anytime there is a change in the impedance test frequency.
 void Rhd2000Impedance::generateAuxCmds() {
+
     // Temp variable to hold aux commands
     vector<int> commandList;
 
@@ -121,7 +122,7 @@ void Rhd2000Impedance::generateAuxCmds() {
 
     // Same thing except for the number of settling periods, which are discarded
     // before performing any calculations
-    numSettlePeriods = qRound(0.010 * actualImpedanceFreq); // 10 ms to let things settle
+    numSettlePeriods = qRound(0.005 * actualImpedanceFreq); // 5 ms to let things settle
     if (numSettlePeriods < 5) numSettlePeriods = 1; // ...but always allow at least 1 settling period
     numSettleBlocks = qCeil((numSettlePeriods) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 10 periods to give time to settle initially
 
@@ -139,6 +140,54 @@ void Rhd2000Impedance::generateAuxCmds() {
     evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd2, 0);
     evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd2, 0, commandSequenceLength - 1);
     evalBoard->selectAuxCommandBank(usedPort, Rhd2000EvalBoard::AuxCmd2, 0);
+
+    //// AUXCMD3 -- CHIP REGISTERS ////
+
+    // For the AuxCmd3 slot, we will create two command sequences. Both sequences
+    // will configure and read back the RHD2000 chip registers, but one sequence will
+    // also run ADC calibration.
+    // Before generating register configuration command sequences, set amplifier
+    // bandwidth paramters.
+
+    // Update the chipregister object with the board sample rate and ensure
+    // the DSP is on
+    chipRegisters->defineSampleRate(boardSampleRate);
+
+    // AuxCmd3, Bank 0: ADC calibration
+    auxCmd3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, true);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 0);
+
+    // AuxCmd3, Bank 1: No calibration
+    auxCmd3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, false);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 1);
+
+    // AuxCmd3, Bank 2: No calibration, 100fF series cap for zcheck, zcheck enabled
+    chipRegisters->enableZcheck(true);
+    chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs100fF);
+    auxCmd3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, false);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 2);
+
+    // AuxCmd3, Bank 3: No calibration, 1pF series cap for zcheck, zcheck enabled
+    chipRegisters->enableZcheck(true);
+    chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs1pF);
+    auxCmd3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, false);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 3);
+
+    // AuxCmd3, Bank 4: No calibration, 10pF series cap for zcheck, zcheck enabled
+    chipRegisters->enableZcheck(true);
+    chipRegisters->setZcheckScale(Rhd2000Registers::ZcheckCs10pF);
+    auxCmd3SequenceLength = chipRegisters->createCommandListRegisterConfig(commandList, false);
+    evalBoard->uploadCommandList(commandList, Rhd2000EvalBoard::AuxCmd3, 4);
+    evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd3, 0, auxCmd3SequenceLength - 1);
+}
+
+// For some configuration changes (e.g. a channel switch) we do not need to
+// fully regenerate all AuxCmds, which is time consuming. This can be run to
+// only regenerate AuxCmd3 which hold chip configuration registers
+void Rhd2000Impedance::generateAuxCmd3() {
+
+    // Temp variable to hold aux commands
+    vector<int> commandList;
 
     //// AUXCMD3 -- CHIP REGISTERS ////
 
@@ -247,8 +296,8 @@ int Rhd2000Impedance::selectChannel(int selectedChannel) {
     channel = selectedChannel;
     chipRegisters->setZcheckChannel(channel);
 
-    // Update the new chip registers
-    generateAuxCmds();
+    // Update AuxCmd3 to instaniate channel switch
+    generateAuxCmd3();
 
     channelSelected = true;
 
@@ -454,15 +503,6 @@ int Rhd2000Impedance::measureImpedance()
 
     // Success
     return 0;
-}
-
-// Measure the impedance on selected channel at selected frequency
-int Rhd2000Impedance::measureImpedance(double Fs)
-{
-    // Switch to desired impedance test frequency, generate
-    // the test signal, and test impedance
-    changeImpedanceFrequency(Fs);
-    return measureImpedance();
 }
 
 // Public method for changing impedance test signal frequency

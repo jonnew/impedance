@@ -44,8 +44,8 @@ int main(int argc, char *argv[])
 
         // Clean electrode and apply initial plating
         // TODO: User settable protocol parameters (plating times, plating currents)
-        impedance->plate(0.1,500);
-        impedance->plate(-0.05,500);
+        //impedance->plate(0.1,500);
+        //impedance->plate(-0.05,500);
 
         impedance->measureImpedance();
         impedance->printImpedance();

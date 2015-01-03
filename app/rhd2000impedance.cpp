@@ -310,7 +310,7 @@ int RHD2000Impedance::measureImpedance()
     int stream, capRange;
     double cSeries;
     int triggerIndex;                       // dummy reference variable; not used
-    queue<Rhd2000DataBlock> bufferQueue;    // dummy reference variable; not used
+    QQueue<Rhd2000DataBlock> bufferQueue;    // dummy reference variable; not used
 
     if (!impedanceConfigured)
     {
@@ -366,7 +366,7 @@ int RHD2000Impedance::measureImpedance()
         evalBoard->readDataBlocks(numSettleBlocks, dataQueue);
 
         // Clear the settling blocks from the queue
-        queue<Rhd2000DataBlock>().swap(dataQueue);
+        QQueue<Rhd2000DataBlock>().swap(dataQueue);
 
         // Get the real data
         evalBoard->readDataBlocks(numBlocks, dataQueue);
@@ -634,14 +634,15 @@ void RHD2000Impedance::setupEvalBoard()
 
         exit(EXIT_FAILURE);
     }
-    else if(errorCode != 0) {
+    else if(errorCode != 1) {
 
+        cout << "Evalulation board setup exited with error code " << errorCode << "." << endl;
         exit(EXIT_FAILURE);
     }
 
     // Load Rhythm FPGA configuration bitfile (provided by Intan Technologies).
     // Place main.bit in the executable directory, or add a complete path to file.
-    string bitfilename = "M:/public/impedance/build/debug/main.bit";
+    string bitfilename = "main.bit";
     if (!evalBoard->uploadFpgaBitfile(bitfilename))
     {
         cout << "FPGA configuration file upload error. "

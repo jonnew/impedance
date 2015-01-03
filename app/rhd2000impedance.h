@@ -16,6 +16,7 @@ class SignalSources;
 class SignalGroup;
 class SignalChannel;
 class PlateControl;
+class Rhd2000DataBlock;
 
 using namespace std;
 
@@ -100,8 +101,8 @@ private:
     // Data structs
     int ttlOut[16];
     QVector<int> chipId;
-    queue<Rhd2000DataBlock> dataQueue;
-    queue<Rhd2000DataBlock> filteredDataQueue;
+    QQueue<Rhd2000DataBlock> dataQueue;
+    QQueue<Rhd2000DataBlock> filteredDataQueue;
     unsigned int numUsbBlocksToRead;
 
     // Parameters and data used to derive impedance measurements

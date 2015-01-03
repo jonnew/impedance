@@ -21,10 +21,10 @@
 #include <iostream>
 #include <iomanip>
 #include <vector>
-#include <queue>
+#include <QQueue>
 
-//#include <fstream>
-//#include <cmath>
+#include <fstream>
+#include <cmath>
 
 #include "rhd2000evalboard.h"
 #include "rhd2000datablock.h"
@@ -1333,7 +1333,7 @@ bool Rhd2000EvalBoard::readDataBlock(Rhd2000DataBlock *dataBlock)
 
 // Reads a certain number of USB data blocks, if the specified number is available, and appends them
 // to queue.  Returns true if data blocks were available.
-bool Rhd2000EvalBoard::readDataBlocks(int numBlocks, queue<Rhd2000DataBlock> &dataQueue)
+bool Rhd2000EvalBoard::readDataBlocks(int numBlocks, QQueue<Rhd2000DataBlock> &dataQueue)
 {
     unsigned int numWordsToRead, numBytesToRead;
     int i;
@@ -1357,7 +1357,7 @@ bool Rhd2000EvalBoard::readDataBlocks(int numBlocks, queue<Rhd2000DataBlock> &da
     dataBlock = new Rhd2000DataBlock(numDataStreams);
     for (i = 0; i < numBlocks; ++i) {
         dataBlock->fillFromUsbBuffer(usbBuffer, i, numDataStreams);
-        dataQueue.push(*dataBlock);
+        dataQueue.enqueue(*dataBlock);
     }
     delete dataBlock;
 
@@ -1366,13 +1366,13 @@ bool Rhd2000EvalBoard::readDataBlocks(int numBlocks, queue<Rhd2000DataBlock> &da
 
 // Writes the contents of a data block queue (dataQueue) to a binary output stream (saveOut).
 // Returns the number of data blocks written.
-int Rhd2000EvalBoard::queueToFile(queue<Rhd2000DataBlock> &dataQueue, ofstream &saveOut)
+int Rhd2000EvalBoard::queueToFile(QQueue<Rhd2000DataBlock> &dataQueue, ofstream &saveOut)
 {
     int count = 0;
 
     while (!dataQueue.empty()) {
         dataQueue.front().write(saveOut, getNumEnabledDataStreams());
-        dataQueue.pop();
+        dataQueue.dequeue();
         ++count;
     }
 

@@ -69,7 +69,7 @@ int PlateControl::setPlateParameters(double currentuA, unsigned long durationMil
     }
 
     // Set the DAC voltage
-    currentuA = abs(currentuA);
+    currentuA = fabs(currentuA);
     dacVoltage = 32768 + qFloor((32768/3.3) * currentuA/uAPerVolt);
     plateDurationMilliSec = durationMilliSec;
 

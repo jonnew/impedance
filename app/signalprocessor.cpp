@@ -532,9 +532,9 @@ void SignalProcessor::closeSaveFiles(SignalSources *signalSources)
 // used to reference the trigger point to zero.
 //
 // Returns number of bytes written to binary datastream out if saveToDisk == true.
-int SignalProcessor::loadAmplifierData(queue<Rhd2000DataBlock> &dataQueue,
+int SignalProcessor::loadAmplifierData(QQueue<Rhd2000DataBlock> &dataQueue,
                                        int numBlocks, bool lookForTrigger, int triggerChannel,
-                                       int triggerPolarity, int &triggerTimeIndex, queue<Rhd2000DataBlock> &bufferQueue,
+                                       int triggerPolarity, int &triggerTimeIndex, QQueue<Rhd2000DataBlock> &bufferQueue,
                                        bool saveToDisk, QDataStream &out, SaveFormat format, bool saveTemp,
                                        bool saveTtlOut, int timestampOffset)
 {
@@ -953,10 +953,10 @@ int SignalProcessor::loadAmplifierData(queue<Rhd2000DataBlock> &dataQueue,
         }
 
         if (lookForTrigger) {
-            bufferQueue.push(dataQueue.front());
+            bufferQueue.enqueue(dataQueue.front());
         }
         // We are done with this Rhd2000DataBlock object; remove it from dataQueue
-        dataQueue.pop();
+        dataQueue.dequeue();
     }
 
     // If we are operating on the "One File Per Channel" format, we have saved all amplifier data from
@@ -973,7 +973,7 @@ int SignalProcessor::loadAmplifierData(queue<Rhd2000DataBlock> &dataQueue,
 
 // Save to entire contents of the buffer queue to disk, and empty the queue in the process.
 // Returns number of bytes written to binary datastream out.
-int SignalProcessor::saveBufferedData(queue<Rhd2000DataBlock> &bufferQueue, QDataStream &out, SaveFormat format,
+int SignalProcessor::saveBufferedData(QQueue<Rhd2000DataBlock> &bufferQueue, QDataStream &out, SaveFormat format,
                                       bool saveTemp, bool saveTtlOut, int timestampOffset)
 {
     int t, i, j, stream;
@@ -1088,7 +1088,7 @@ int SignalProcessor::saveBufferedData(queue<Rhd2000DataBlock> &bufferQueue, QDat
                 }
             }
             // We are done with this Rhd2000DataBlock object; remove it from bufferQueue
-            bufferQueue.pop();
+            bufferQueue.dequeue();
         }
         break;
     case SaveFormatFilePerSignalType:
@@ -1190,7 +1190,7 @@ int SignalProcessor::saveBufferedData(queue<Rhd2000DataBlock> &bufferQueue, QDat
             }
 
             // We are done with this Rhd2000DataBlock object; remove it from bufferQueue
-            bufferQueue.pop();
+            bufferQueue.dequeue();
         }
         break;
 
@@ -1293,7 +1293,7 @@ int SignalProcessor::saveBufferedData(queue<Rhd2000DataBlock> &bufferQueue, QDat
             }
 
             // We are done with this Rhd2000DataBlock object; remove it from bufferQueue
-            bufferQueue.pop();
+            bufferQueue.dequeue();
         }
         break;
     }

@@ -13,6 +13,7 @@
 #include <QVector>
 #include <QThread>
 #include <iostream>
+#include <QQueue>
 
 
 

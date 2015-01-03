@@ -22,7 +22,6 @@
 #ifndef SIGNALPROCESSOR_H
 #define SIGNALPROCESSOR_H
 
-#include <queue>
 #include "qtinclude.h"
 #include "signalchannel.h"
 #include "globalconstants.h"
@@ -44,14 +43,14 @@ public:
     void setNotchFilterEnabled(bool enable);
     void setHighpassFilter(double cutoffFreq, double sampleFreq);
     void setHighpassFilterEnabled(bool enable);
-    int loadAmplifierData(queue<Rhd2000DataBlock> &dataQueue, int numBlocks,
+    int loadAmplifierData(QQueue<Rhd2000DataBlock> &dataQueue, int numBlocks,
                           bool lookForTrigger, int triggerChannel, int triggerPolarity,
-                          int &triggerIndex, queue<Rhd2000DataBlock> &bufferQueue,
+                          int &triggerIndex, QQueue<Rhd2000DataBlock> &bufferQueue,
                           bool saveToDisk, QDataStream &out, SaveFormat format,
                           bool saveTemp, bool saveTtlOut, int timestampOffset);
     int loadSyntheticData(int numBlocks, double sampleRate, bool saveToDisk,
                           QDataStream &out, SaveFormat format, bool saveTemp, bool saveTtlOut);
-    int saveBufferedData(queue<Rhd2000DataBlock> &bufferQueue, QDataStream &out, SaveFormat format,
+    int saveBufferedData(QQueue<Rhd2000DataBlock> &bufferQueue, QDataStream &out, SaveFormat format,
                          bool saveTemp, bool saveTtlOut, int timestampOffset);
     void createSaveList(SignalSources *signalSources);
     void createTimestampFilename(QString path);

@@ -26,6 +26,8 @@
 #define MAX_NUM_DATA_STREAMS 8
 #define FIFO_CAPACITY_WORDS 67108864
 
+#include "qtinclude.h"
+
 using namespace std;
 
 class okCFrontPanel;
@@ -146,8 +148,8 @@ public:
 
     void flush();
     bool readDataBlock(Rhd2000DataBlock *dataBlock);
-    bool readDataBlocks(int numBlocks, queue<Rhd2000DataBlock> &dataQueue);
-    int queueToFile(queue<Rhd2000DataBlock> &dataQueue, std::ofstream &saveOut);
+    bool readDataBlocks(int numBlocks, QQueue<Rhd2000DataBlock> &dataQueue);
+    int queueToFile(QQueue<Rhd2000DataBlock> &dataQueue, std::ofstream &saveOut);
     int getBoardMode() const;
     int getCableDelay(BoardPort port) const;
     void getCableDelay(vector<int> &delays) const;

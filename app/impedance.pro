@@ -8,7 +8,7 @@ QT       += core
 
 QT       -= gui
 
-TARGET = impedance
+TARGET = impedance.bin
 
 TEMPLATE = app
 CONFIG   += console

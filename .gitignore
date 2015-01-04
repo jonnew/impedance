@@ -3,6 +3,7 @@
 *.o
 *.so
 *.zip
+*.bin
 
 # Don't track builds
 build/**

@@ -7,3 +7,4 @@
 # Don't track builds
 build/**
 **/*build*
+Makefile

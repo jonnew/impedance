@@ -44,7 +44,7 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     chipRegisters = new Rhd2000Registers(boardSampleRate);
 
     // Create plating control object
-    plateControl = new PlateControl(0, 0.1/3.3, 0, 1, 2);
+    plateControl = new PlateControl(0, 10/3.3, 0, 1, 2);
 
     // Set default filter freqs
     notchFilterFrequency = 60.0;
@@ -111,7 +111,7 @@ void RHD2000Impedance::generateAuxCmds() {
     // a single impeance test waveform.
     // It determines the number of samples that return closest number of full data blocks
     // to the requested number of impedance test waveform periods.
-    numPeriods = qRound(0.020 * actualImpedanceFreq); // Test each channel for at least 20 msec...
+    numPeriods = qRound(0.25 * actualImpedanceFreq); // Test each channel for 250 msec...
     if (numPeriods < 5) numPeriods = 5; // ...but always measure across no fewer than 5 complete periods
     relativePeriod = boardSampleRate / actualImpedanceFreq;
     numBlocks = qCeil((numPeriods) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 10 periods to give time to settle initially
@@ -120,7 +120,7 @@ void RHD2000Impedance::generateAuxCmds() {
 
     // Same thing except for the number of settling periods, which are discarded
     // before performing any calculations
-    numSettlePeriods = qRound(0.005 * actualImpedanceFreq); // 5 ms to let things settle
+    numSettlePeriods = qRound(0.05 * actualImpedanceFreq); // 50 ms to let things settle
     if (numSettlePeriods < 5) numSettlePeriods = 1; // ...but always allow at least 1 settling period
     numSettleBlocks = qCeil((numSettlePeriods) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 10 periods to give time to settle initially
 

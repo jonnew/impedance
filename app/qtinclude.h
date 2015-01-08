@@ -11,9 +11,10 @@
 #include <QTime>
 #include <qmath.h>
 #include <QVector>
-#include <QThread>
+//#include <QThread>
 #include <iostream>
 #include <QQueue>
+#include <QTextStream>
 
 
 

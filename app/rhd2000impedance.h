@@ -8,6 +8,13 @@
 #include "rhd2000datablock.h"
 #include "platecontrol.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QFile>
+#include <QDate>
+#include <QJsonDocument>
+#include <string>
+
 // Included class objects
 class Rhd2000EvalBoard;
 class SignalProcessor;
@@ -30,15 +37,23 @@ public:
 
     // User-twidlable
     int selectChannel(int selectedChannel);
-    void changeImpedanceFrequency(double Fs);
+    void setImpedanceTestFrequency(double Fs);
     int measureImpedance(void);
     void printImpedance(void);
     double getImpedancePhase(void);
     double getImpedanceMagnitude(void);
-    int plate(double currentuA, unsigned long durationMilliSec);
+    void setNumAverages(int n);
+    void setNumPeriods(int n);
+    int plate(PlateControl *pc);
+
+    void setRecordingState(bool on);
+    bool saveLog(void);
+    void clearLogFile(void);
+    void setSaveLocation(QString f);
 
     // This structure exposes all channel information and impedance results
     SignalSources *signalSources;
+
 
 
 private:
@@ -65,7 +80,12 @@ private:
                                        double boardSampleRate);
 
 
-    //void saveImpedance();
+    void write(QJsonObject &json, double mag, double phase) const;
+
+    // Impedance/plate log array
+    QTime timer;
+    QJsonArray log;
+    QString fname;
 
     // Class-wide objects
     Rhd2000EvalBoard *evalBoard;
@@ -106,19 +126,20 @@ private:
     unsigned int numUsbBlocksToRead;
 
     // Parameters and data used to derive impedance measurements
+    bool recordingOn;
     int channel;
     bool impedanceConfigured;
     bool channelSelected;
+    int numAverages;
     int numPeriods;
     int numBlocks;
     int numSettleBlocks;
     int numSettlePeriods;
     double relativePeriod;
+    QVector<QVector<QVector<double> > > measuredMagnitudeRaw;
+    QVector<QVector<QVector<double> > > measuredPhaseRaw;
     QVector<QVector<QVector<double> > > measuredMagnitude;
     QVector<QVector<QVector<double> > > measuredPhase;
-
-    // Plating
-    PlateControl *plateControl;
 
     // Data file stuff (this will be changed/removed)
     SaveFormat saveFormat;

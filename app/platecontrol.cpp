@@ -3,21 +3,17 @@
 
 using namespace std;
 
-PlateControl::PlateControl(int plateControlDAC,
-                           double currentGainuAPerVolt,
-                           int plateTriggerBit,
-                           int platePolarityBit,
-                           int headStageSelectBit0)
+PlateControl::PlateControl(double currentGainuAPerVolt)
 {
     // Select the DAC used to control the current or voltage source and provide
     // the uA/V selection
-    dacNumber = plateControlDAC;
+    dacNumber = 0;
     uAPerVolt = currentGainuAPerVolt;
 
     // Select the digital control lines
-    plateBit = plateTriggerBit;
-    polarityBit = platePolarityBit;
-    headstageSelect0 = headStageSelectBit0;
+    plateBit = 0;
+    polarityBit = 1;
+    headstageSelect0 = 2;
 
     // Bitmasks
     plateMask =  1 << plateBit;
@@ -29,10 +25,12 @@ PlateControl::PlateControl(int plateControlDAC,
 
 }
 
-int PlateControl::selectHeadstage(int headstageNumber) {
+int PlateControl::setHeadstage(int rhd2000AmpNumber) {
 
-    if (headstageNumber < 3 && headstageNumber >= 0) {
-        selectedHeadstage = headstageNumber;
+    // TODO: This now is hard coded to handle up to 4 elec_test lines. I suppose
+    // at full capacity, the eval board can handle 8.
+    if (rhd2000AmpNumber < 3 && rhd2000AmpNumber >= 0) {
+        selectedHeadstage = rhd2000AmpNumber;
         ttl = ((ttl & ~headstageMask) | selectedHeadstage << headstageSelect0);
 
         return 0;
@@ -49,44 +47,29 @@ void PlateControl::setPolarity(bool polarity) {
     ttl = ((ttl & ~polarityMask) | polarity << polarityBit);
 
     if (polarity) {
+        platePolarity = 1;
         cout << "Plating polarity set to +." << endl;
     }
     else {
+        platePolarity = -1;
         cout << "Plating polarity set to -." << endl;
     }
 
 
 }
 
-int PlateControl::setPlateParameters(double currentuA, unsigned long durationMilliSec) {
+void PlateControl::setPlateDuration(int durationMilliSec) {
 
-    // Set the polarity
-    if (currentuA < 0) {
-        setPolarity(false);
+    if (durationMilliSec > 0) {
+
+        plateDurationMilliSec = durationMilliSec;
+        cout << "Plating duration set to " << plateDurationMilliSec << " ms." << endl;
     }
     else {
-        setPolarity(true);
+        plateDurationMilliSec = 3000;
+        qWarning("Plating duration cannot be negative.");
+        cout << "Plating duration set to 3000 ms." << endl;
     }
-
-    // Set the DAC voltage
-    currentuA = fabs(currentuA);
-    dacVoltage = 32768 + qFloor((32768/3.3) * currentuA/uAPerVolt);
-    plateDurationMilliSec = durationMilliSec;
-
-    if (dacVoltage > 65536) {
-        dacVoltage = 65536;
-        cerr << "The requested plating current is too high. It has been set to the max value." << endl;
-        return -1;
-    }
-    else {
-        cout << "Plating current set to " << currentuA << " uA" << endl;
-        return 0;
-    }
-
-}
-
-void PlateControl::applyPlatingDelay(){
-    QThread::msleep(plateDurationMilliSec);
 }
 
 void PlateControl::turnPlatingOn() {
@@ -110,4 +93,40 @@ int* PlateControl::getTTLState(int ttlState[]) {
 
 }
 
+void PlateControl::write(QJsonObject &json, int channel) const {
 
+
+    json["channel"] = channel;
+    json["polarity"] = platePolarity;
+    json["uAPerVolt"] = uAPerVolt;
+    json["durationMilliSec"] = (int)plateDurationMilliSec;
+    json["currentMicroA"] =  plateCurrentuA;
+
+}
+
+void PlateControl::setPlateCurrent(double currentuA) {
+    // Set the current
+    plateCurrentuA = currentuA;
+
+    // Set the polarity
+    if (plateCurrentuA < 0) {
+        setPolarity(false);
+    }
+    else {
+        setPolarity(true);
+    }
+
+    // Set the DAC voltage
+    plateCurrentuA = fabs( plateCurrentuA);
+    dacVoltage = 32768 + qFloor((32768/3.3) *  plateCurrentuA/uAPerVolt);
+
+    if (dacVoltage > 65535) {
+        dacVoltage = 65535;
+        plateCurrentuA = 3.3 * uAPerVolt;
+        qWarning("The requested plating current is too high."
+                 "It has been set to the maximum value of %f.", plateCurrentuA);
+    }
+    else {
+        cout << "Plating current set to " << currentuA << " uA" << endl;
+    }
+}

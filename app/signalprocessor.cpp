@@ -1804,6 +1804,8 @@ void SignalProcessor::measureComplexAmplitude(QVector<QVector<QVector<double> > 
     // Measure real (iComponent) and imaginary (qComponent) amplitude of frequency component.
     amplitudeOfFreqComponent(iComponent, qComponent, amplifierPreFilter[stream][chipChannel],
                              startIndex, endIndex, sampleRate, frequency);
+
+
     // Calculate magnitude and phase from real (I) and imaginary (Q) components.
     measuredMagnitude[stream][chipChannel][capIndex] =
             qSqrt(iComponent * iComponent + qComponent * qComponent);

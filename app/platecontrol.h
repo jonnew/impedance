@@ -1,32 +1,34 @@
 #ifndef PLATECONTROL_H
 #define PLATECONTROL_H
 
+#include <QJsonObject>
+
 class PlateControl
 {
 public:
 
     // Eval-board based plating control
-    PlateControl(int plateControlDAC,
-                 double currentGainuAPerVolt,
-                 int plateTriggerBit,
-                 int platePolarityBit,
-                 int headStageSelectBit0);
+    PlateControl(double currentGainuAPerVolt);
 
     // Plating control methods
     void turnPlatingOn(void);
     void turnPlatingOff(void);
-    void applyPlatingDelay(void);
 
     // Plating parameters
-    int setPlateParameters(double currentuA, unsigned long durationMilliSec);
-    int selectHeadstage(int headstageNumber);
+    void setPlateDuration(int durationMilliSec);
+    void setPlateCurrent(double currentuA);
+    int setHeadstage(int headstageNumber);
 
     // Get the nessesary information for writing to digital and analog
     // channels on eval board
     int dacNumber;
     int dacVoltage;
-    unsigned long plateDurationMilliSec;
+    int plateDurationMilliSec;
+    int cleanDurationMilliSec;
     int* getTTLState(int ttlState[]);
+
+    // State recording
+    void write(QJsonObject &json, int channel) const;
 
 
 private:
@@ -43,6 +45,9 @@ private:
     unsigned short polarityMask;
     unsigned short headstageMask;
     unsigned short ttl;
+    int platePolarity;
+    double plateCurrentuA;
+    double cleanCurrentuA;
     //
 
     // This is accomplished by a manual switch, but perhas an analog mux

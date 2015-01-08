@@ -9,12 +9,16 @@
 #include "platecontrol.h"
 #include "qtinclude.h"
 
+
 #include "okFrontPanelDLL.h"
 
 using namespace std;
 
 RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
 {
+    // Start the clock
+    timer.start();
+
     // Initialized default parameters
     cout << "Intializing internal default parameters...";
 
@@ -35,6 +39,8 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     // Default electrode impedance measurement frequency
     desiredImpedanceFreq = 1000.0;
     actualImpedanceFreq = 0.0;
+    numPeriods = 10;
+    numAverages = 2;
     impedanceFreqValid = false;
     impedanceConfigured = false;
 
@@ -42,9 +48,6 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     signalProcessor = new SignalProcessor();
     signalSources = new SignalSources();
     chipRegisters = new Rhd2000Registers(boardSampleRate);
-
-    // Create plating control object
-    plateControl = new PlateControl(0, 10/3.3, 0, 1, 2);
 
     // Set default filter freqs
     notchFilterFrequency = 60.0;
@@ -70,16 +73,25 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
         ttlOut[i] = 0;
     }
 
+    // Data saving
+    recordingOn = false;
+    QTextStream filestream;
+
     // Perform internal hardware and measurement setups
     setupEvalBoard();
     setupAmplifier();
     setupImpedanceTest();
 
+    // Default parameters
+    setImpedanceTestFrequency(desiredImpedanceFreq);
+    setNumAverages(numAverages);
+    setNumPeriods(numPeriods);
+
     cout << "done." << endl;
 }
 
 // Create auxiliary commands required to perform impedance testing. This function
-// must be run anytime there is a change in the impedance test frequency.
+// must be run anytime there is a change in the impedance test frequency,
 void RHD2000Impedance::generateAuxCmds() {
 
     // Temp variable to hold aux commands
@@ -106,26 +118,6 @@ void RHD2000Impedance::generateAuxCmds() {
     evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmd1,
                                       0, auxCmd1SequenceLength - 1);
     evalBoard->selectAuxCommandBank(usedPort,Rhd2000EvalBoard::AuxCmd1, 0);
-
-    // This sequence of commands sets number of samples to be generated during
-    // a single impeance test waveform.
-    // It determines the number of samples that return closest number of full data blocks
-    // to the requested number of impedance test waveform periods.
-    numPeriods = qRound(0.25 * actualImpedanceFreq); // Test each channel for 250 msec...
-    if (numPeriods < 5) numPeriods = 5; // ...but always measure across no fewer than 5 complete periods
-    relativePeriod = boardSampleRate / actualImpedanceFreq;
-    numBlocks = qCeil((numPeriods) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 10 periods to give time to settle initially
-    if (numBlocks < 2) numBlocks = 2;   // need first block for command to switch channels to take effect.
-
-
-    // Same thing except for the number of settling periods, which are discarded
-    // before performing any calculations
-    numSettlePeriods = qRound(0.05 * actualImpedanceFreq); // 50 ms to let things settle
-    if (numSettlePeriods < 5) numSettlePeriods = 1; // ...but always allow at least 1 settling period
-    numSettleBlocks = qCeil((numSettlePeriods) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 10 periods to give time to settle initially
-
-    impedanceTestSamples = SAMPLES_PER_DATA_BLOCK * (numBlocks + numSettleBlocks);
-
 
     // Now we are configured
     impedanceConfigured = true;
@@ -349,44 +341,49 @@ int RHD2000Impedance::measureImpedance()
         // Select AuxCmd1 with the sine wave impedance test waveform
         evalBoard->selectAuxCommandBank(usedPort,Rhd2000EvalBoard::AuxCmd1, 1);
 
-//        // TEMP: Read the resulting single data block from the USB interface.
-//        evalBoard->setContinuousRunMode(false);
-//        evalBoard->setMaxTimeStep(auxCmd3SequenceLength);
-//        Rhd2000DataBlock *dataBlock = new Rhd2000DataBlock(evalBoard->getNumEnabledDataStreams());
-//        evalBoard->readDataBlock(dataBlock);
-//        dataBlock->print(0);
+        // Clear previous results
+        for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream) {
+            measuredMagnitude[stream][channel][capRange] = 0;
+            measuredPhase[stream][channel][capRange] = 0;
+        }
 
         // Run the test signal, collect the data
-        evalBoard->setContinuousRunMode(false);
-        evalBoard->setMaxTimeStep(impedanceTestSamples);
-        evalBoard->run();
-        while (evalBoard->isRunning() ) { }
+        for (int avg = 0; avg < numAverages; avg++) {
 
-        // Get the settling period blocks from the fifo
-        evalBoard->readDataBlocks(numSettleBlocks, dataQueue);
+            evalBoard->setContinuousRunMode(false);
+            evalBoard->setMaxTimeStep(impedanceTestSamples);
+            evalBoard->run();
+            while (evalBoard->isRunning() ) { }
 
-        // Clear the settling blocks from the queue
-        QQueue<Rhd2000DataBlock>().swap(dataQueue);
+            // Get the settling period blocks from the fifo
+            evalBoard->readDataBlocks(numSettleBlocks, dataQueue);
 
-        // Get the real data
-        evalBoard->readDataBlocks(numBlocks, dataQueue);
-        signalProcessor->loadAmplifierData(dataQueue, numBlocks, false,
-                                           0, 0, triggerIndex, bufferQueue,
-                                           false, *saveStream, saveFormat,
-                                           false, false, 0);
+            // Clear the settling blocks from the queue
+            QQueue<Rhd2000DataBlock>().swap(dataQueue);
 
-        for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream)
-        {
-            signalProcessor->measureComplexAmplitude(measuredMagnitude,
-                                                     measuredPhase,
-                                                     capRange,
-                                                     stream,
-                                                     channel,
-                                                     numBlocks,
-                                                     boardSampleRate,
-                                                     actualImpedanceFreq,
-                                                     numPeriods);
+            // Get the real data
+            evalBoard->readDataBlocks(numBlocks, dataQueue);
+            signalProcessor->loadAmplifierData(dataQueue, numBlocks, false,
+                                               0, 0, triggerIndex, bufferQueue,
+                                               false, *saveStream, saveFormat,
+                                               false, false, 0);
 
+
+
+            for (stream = 0; stream < evalBoard->getNumEnabledDataStreams(); ++stream) {
+                signalProcessor->measureComplexAmplitude(measuredMagnitudeRaw,
+                                                         measuredPhaseRaw,
+                                                         capRange,
+                                                         stream,
+                                                         channel,
+                                                         numBlocks,
+                                                         boardSampleRate,
+                                                         actualImpedanceFreq,
+                                                         numPeriods);
+
+                measuredMagnitude[stream][channel][capRange] += measuredMagnitudeRaw[stream][channel][capRange]/numAverages;
+                measuredPhase[stream][channel][capRange] += measuredPhaseRaw[stream][channel][capRange]/numAverages;
+            }
         }
 
         // TODO: Account for 64-channel chip
@@ -485,9 +482,14 @@ int RHD2000Impedance::measureImpedance()
             empiricalResistanceCorrection(impedanceMagnitude, impedancePhase,
                                           boardSampleRate);
 
-
             signalChannel->electrodeImpedanceMagnitude = impedanceMagnitude;
             signalChannel->electrodeImpedancePhase = impedancePhase;
+
+            if (recordingOn) {
+                QJsonObject impObject;
+                write(impObject, impedanceMagnitude,  impedancePhase);
+                log.append(impObject);
+            }
         }
     }
 
@@ -504,7 +506,7 @@ int RHD2000Impedance::measureImpedance()
 }
 
 // Public method for changing impedance test signal frequency
-void RHD2000Impedance::changeImpedanceFrequency(double Fs)
+void RHD2000Impedance::setImpedanceTestFrequency(double Fs)
 {
     // Examine desired frequency to make sure its OK
     desiredImpedanceFreq = Fs;
@@ -553,6 +555,60 @@ void RHD2000Impedance::printImpedance()
     cout << "   Phase (deg.): " << signalChannel->electrodeImpedancePhase << endl;
     cout << endl;
 }
+
+//void RHD2000Impedance::openResultsFile(sting fname) {
+
+//    QFile file(fname + ".csv");
+
+//    if (file.open(QFile::WriteOnly|QFile::Truncate)) {
+//      filestream(&file);
+//    }
+//}
+
+//void RHD2000Impedance::closeResultsFile() {
+//    close(filestream);
+//}
+
+//void RHD2000Impedance::writeMeasurement() {
+
+//    if (!channelSelected) {
+//        cout << "Channel has not been selected, so a impedance results cannot "
+//                "be saved." << endl;
+
+//        return;
+//    }
+
+//    // Construct channel name
+//    SignalChannel *signalChannel;
+
+//    switch (usedPort)
+//    {
+//    case Rhd2000EvalBoard::PortA :
+//        signalChannel = &signalSources->signalPort[0].channel[channel];
+//        break;
+//    case Rhd2000EvalBoard::PortB :
+//        signalChannel = &signalSources->signalPort[1].channel[channel];
+//        break;
+//    case Rhd2000EvalBoard::PortC :
+//        signalChannel = &signalSources->signalPort[2].channel[channel];
+//        break;
+//    case Rhd2000EvalBoard::PortD :
+//        signalChannel = &signalSources->signalPort[3].channel[channel];
+//        break;
+//    }
+
+//    if (filestream) {
+
+//        cout << "Impedance test results:" << endl;
+//        cout << "   Channel: " << channel << endl;
+//        cout << "   Test freq. (Hz): " <<  actualImpedanceFreq << endl;
+//        cout << "   Magnitude (ohms): " << signalChannel->electrodeImpedanceMagnitude << endl;
+//        cout << "   Phase (deg.): " << signalChannel->electrodeImpedancePhase << endl;
+//      stream << value1 << "\t" << value2 << "\n"; // this writes first line with two columns
+//      file.close();
+//    }
+
+//}
 
 double RHD2000Impedance::getImpedanceMagnitude() {
 
@@ -1008,14 +1064,20 @@ void RHD2000Impedance::setupImpedanceTest() {
 // of all amplifier channels (32 on each data stream) at three different Cseries values.
 measuredMagnitude.resize(evalBoard->getNumEnabledDataStreams());
 measuredPhase.resize(evalBoard->getNumEnabledDataStreams());
+measuredMagnitudeRaw.resize(evalBoard->getNumEnabledDataStreams());
+measuredPhaseRaw.resize(evalBoard->getNumEnabledDataStreams());
 for (int i = 0; i < evalBoard->getNumEnabledDataStreams(); ++i)
 {
     measuredMagnitude[i].resize(32);
     measuredPhase[i].resize(32);
+    measuredMagnitudeRaw[i].resize(32);
+    measuredPhaseRaw[i].resize(32);
     for (int j = 0; j < 32; ++j)
     {
         measuredMagnitude[i][j].resize(3);
         measuredPhase[i][j].resize(3);
+        measuredMagnitudeRaw[i][j].resize(3);
+        measuredPhaseRaw[i][j].resize(3);
     }
 }
 }
@@ -1221,10 +1283,67 @@ void RHD2000Impedance::empiricalResistanceCorrection(double &impedanceMagnitude,
     impedancePhase = RADIANS_TO_DEGREES * qAtan2(impedanceX, impedanceR);
 }
 
+// Set the number of impedance measurements to average over in order to get a final
+// measurement.
+void RHD2000Impedance::setNumAverages(int n) {
+
+    if (n > 0) {
+        numAverages = n;
+        cout << "Number of impedance measurements to average over set to " << n << "." << endl;
+    }
+    else
+    {
+        numAverages = 3;
+        cout << "The number of impedance measurements to average over must be a positive number" << endl;
+    }
+}
+
+
+// Set the number of test waveform periods to obtain impedance data over.
+void RHD2000Impedance::setNumPeriods(int n) {
+
+    // First calculate the number of settling periods, which are discarded
+    // before performing any calculations
+    relativePeriod = boardSampleRate / actualImpedanceFreq;
+    numSettlePeriods = qRound(0.01 * actualImpedanceFreq); // 10 ms to let things settle
+    if (numSettlePeriods < 5) numSettlePeriods = 1; // ...but always allow at least 1 settling period
+    numSettleBlocks = qCeil((numSettlePeriods) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 10 periods to give time to settle initially
+
+    // Number of samples in requested number of periods
+    int samples = floor(((double)(n + numSettlePeriods)/actualImpedanceFreq) * boardSampleRate);
+
+    if (n > 0 && samples < 1024) {
+        numPeriods = n;
+        cout << "Number of test waveform periods set to " << n << "." << endl;
+    }
+    else if (samples > 1024) {
+        numPeriods = floor(1024/relativePeriod) - numSettlePeriods;
+        cout << "Too many test waveform periods requested." << endl;
+        cout << "NumPeriods set to value of " << numPeriods << "." << endl;
+    }
+    else
+    {
+        numPeriods =  qRound(0.02 * actualImpedanceFreq);
+        cout << "The number of itest waveform periods must be a positive number" << endl;
+        cout << "NumPeriods set to value of " << numPeriods << "." << endl;
+    }
+
+    if (numPeriods < 5) {
+        numPeriods = 5; // Always measure across no fewer than 5 complete periods
+        cout << "NumPeriods set to minimum value of 5." << endl;
+    }
+
+
+    numBlocks = qCeil((numPeriods) * relativePeriod / (double)SAMPLES_PER_DATA_BLOCK);  // + 10 periods to give time to settle initially
+    if (numBlocks < 2) numBlocks = 2;   // need first block for command to switch channels to take effect.
+    impedanceTestSamples = SAMPLES_PER_DATA_BLOCK * (numBlocks + numSettleBlocks);
+
+}
+
 
 // This function manipulates the auxilary plating circuit through the pre-specifed
 // digital and analog port.
-int RHD2000Impedance::plate(double currentuA, unsigned long durationMilliSec) {
+int RHD2000Impedance::plate(PlateControl *pc) {
 
     // Make sure that a channel has been selected for plating
     if (!channelSelected)
@@ -1233,28 +1352,22 @@ int RHD2000Impedance::plate(double currentuA, unsigned long durationMilliSec) {
         return -1;
     }
 
-    // Tell the plating object what headstage to aim at
-    plateControl->selectHeadstage(usedPort); //TODO: this is wrong I think because ports can have two headstages.
-
-    // Update plating parameters in the platecontrol object
-    plateControl->setPlateParameters(currentuA, durationMilliSec);
-
     // Power up the DAC used for plating control. The gate from the plating source
     // to the electrode will not be opened until the ttl lines are set
     evalBoard->clearTtlOut();
-    evalBoard->enableDac(plateControl->dacNumber, true);
-    evalBoard->selectDacDataStream(plateControl->dacNumber, 8);
-    evalBoard->setDacManual(plateControl->dacVoltage);
+    evalBoard->enableDac(pc->dacNumber, true);
+    evalBoard->selectDacDataStream(pc->dacNumber, 8);
+    evalBoard->setDacManual(pc->dacVoltage);
 
     // Configure the plate start bit
-    plateControl->turnPlatingOn();
+    pc->turnPlatingOn();
 
     // Write the ttl configutation to the evalboard
-    plateControl->getTTLState(ttlOut);
+    pc->getTTLState(ttlOut);
     evalBoard->setTtlOut(ttlOut);
 
     // Highjack the SPI port to create very precise plating times
-    evalBoard->setMaxTimeStep(evalBoard->getSampleRate()*plateControl->plateDurationMilliSec/1000);
+    evalBoard->setMaxTimeStep(evalBoard->getSampleRate() * pc->plateDurationMilliSec/1000);
     evalBoard->run();
     while (evalBoard->isRunning()) {}
 
@@ -1263,21 +1376,91 @@ int RHD2000Impedance::plate(double currentuA, unsigned long durationMilliSec) {
     evalBoard->run();
     while (evalBoard->isRunning()) {}
 
-    evalBoard->enableDac(plateControl->dacNumber, false);
+    evalBoard->enableDac(pc->dacNumber, false);
 
     // Configure the plate stop bit
-    plateControl->turnPlatingOff();
+    pc->turnPlatingOff();
 
     // End the plating session
-    plateControl->getTTLState(ttlOut);
+    pc->getTTLState(ttlOut);
     evalBoard->setTtlOut(ttlOut);
 
     // Get rid of the garbage colleced in the FIFO during the plating process
     // since we are using the SPI bus as a timer for that
     evalBoard->flush();
 
+    if (recordingOn) {
+        QJsonObject plateObject;
+        pc->write(plateObject, channel);
+        log.append(plateObject);
+    }
+
     return 0;
 
+}
+
+void RHD2000Impedance::setRecordingState(bool on) {
+
+    recordingOn = on;
+    if (recordingOn){
+        cout << "Record is on." << endl;
+    }
+    else {
+        cout << "Record is off." << endl;
+    }
+
+
+    // TODO: check if json file is open etc
+}
+
+void RHD2000Impedance::write(QJsonObject &json, double mag, double phase) const
+{
+    // TODO: add measurment time
+    json["time"] = timer.elapsed();
+    json["channel"] = channel;
+    json["testFreq"] = actualImpedanceFreq;
+    json["magnitude"] = mag;
+    json["phase"] = phase;
+}
+
+void RHD2000Impedance::clearLogFile() {
+
+    // Clear the log and start over
+    while (!log.isEmpty()) {
+        log.removeFirst();
+    }
+
+    cout << "Log cleared." << endl;
+}
+
+bool RHD2000Impedance::saveLog() {
+
+    //string fname = "temp";"
+    QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd-hh-mm-ss-zzz");
+    QString fid = fname + ".json";
+
+    QFile saveFile(fid);
+
+    if (!saveFile.open(QIODevice::WriteOnly)) {
+            qWarning("Couldn't open save file.");
+            return false;
+    }
+
+    QJsonObject json;
+    json["time"] = now;
+    json["log"] = log;
+
+    QJsonDocument saveDoc(json);
+    saveFile.write(saveDoc.toJson());
+
+    cout << "Log saved." << endl;
+    return true;
+}
+
+void RHD2000Impedance::setSaveLocation(QString f) {
+
+    cout << "Log save locations set to " << f.toStdString() << "." << endl;
+    fname = f;
 }
 
 

@@ -96,7 +96,7 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *o
             return CommandLineError;
         }
         if (options->fid.exists() && options->fid.isFile() && !options->force) {
-            *errorMessage = "Selected log file already exists, use the -f option to overwrite:" + options->fid.absoluteFilePath();
+            *errorMessage = "Selected log file already exists, use the -f option to overwrite: " + options->fid.absoluteFilePath();
             return CommandLineError;
         }
     }

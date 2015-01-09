@@ -10,25 +10,37 @@ public:
     // Eval-board based plating control
     PlateControl(double currentGainuAPerVolt);
 
+    // Possible modes
+    enum modes {
+        PLATE,
+        CLEAN
+    };
+
     // Plating control methods
-    void turnPlatingOn(void);
-    void turnPlatingOff(void);
+    void turnCurrentSourceOn(void);
+    void turnCurrentSourceOff(void);
 
     // Plating parameters
+    void setMode(modes newMode);
     void setPlateDuration(int durationMilliSec);
     void setPlateCurrent(double currentuA);
+    void setCleaningCurrent(double currentuA);
+    void setCleaningDuration(int durationMilliSec);
     int setHeadstage(int headstageNumber);
+    int getDacVoltage();
+    int getDacNumber();
+    int getPlatingDuration();
+    int getCleaningDuration();
 
     // Get the nessesary information for writing to digital and analog
     // channels on eval board
-    int dacNumber;
-    int dacVoltage;
-    int plateDurationMilliSec;
-    int cleanDurationMilliSec;
+
     int* getTTLState(int ttlState[]);
 
     // State recording
-    void write(QJsonObject &json, int channel) const;
+    void writePlate(QJsonObject &json, int channel, int time) const;
+    void writeClean(QJsonObject &json, int channel, int time) const;
+
 
 
 private:
@@ -45,10 +57,17 @@ private:
     unsigned short polarityMask;
     unsigned short headstageMask;
     unsigned short ttl;
-    int platePolarity;
+    int mode;
+    int polarity;
     double plateCurrentuA;
-    double cleanCurrentuA;
-    //
+    double cleaningCurrentuA;
+    int plateDurationMilliSec;
+    int cleaningDurationMilliSec;
+    int dacNumber;
+    int dacVoltage;
+
+
+    bool configured;
 
     // This is accomplished by a manual switch, but perhas an analog mux
     // would be better?
@@ -57,7 +76,7 @@ private:
 
     // Pull the ground pin above or below the plating voltage
     // in order to plate/deplate
-    void setPolarity(bool polarity);
+    void setPolarity(bool pol);
 
 };
 

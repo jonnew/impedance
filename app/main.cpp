@@ -9,11 +9,6 @@
 // In no event will the authors be held liable for any damages arising from the
 // use of this software.
 //
-// Permission is granted to anyone to use this software for any applications that
-// use Intan Technologies integrated circuits, and to alter it and redistribute it
-// freely.
-//
-// See http://www.intantech.com for documentation and product information.
 //----------------------------------------------------------------------------------
 
 #include <iostream>
@@ -22,10 +17,101 @@
 #include <queue>
 #include <time.h>
 #include <QCommandLineParser>
+#include <QFileInfo>
+#include <QDir>
 
 #include "rhd2000impedance.h"
 
 using namespace std;
+
+struct CLOptions
+{
+    QFileInfo fid;
+    double currentGain;
+    bool force;
+};
+
+enum CommandLineParseResult
+{
+    CommandLineOk,
+    CommandLineError,
+    CommandLineVersionRequested,
+    CommandLineHelpRequested
+};
+
+CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *options, QString *errorMessage)
+{
+
+    // A file bname (-f, --force)
+    const QCommandLineOption forceOption(QStringList() << "f" << "force",
+                                        QCoreApplication::translate("main", "Force log file overwrite if applicable."));
+
+    parser.addOption(forceOption);
+
+    // A file bname (-l, --log)
+    const QCommandLineOption fileOption(QStringList() << "l" << "log",
+                                        QCoreApplication::translate("main", "Log file save location."),
+                                        QCoreApplication::translate("main", "Save location"));
+    parser.addOption(fileOption);
+
+    // The voltageToCurrent gain (-g, --gain)
+    const QCommandLineOption gainOption(QStringList() << "g" << "gain",
+                                        QCoreApplication::translate("main", "Microamps per volt setting for electrode activation circuit."),
+                                        QCoreApplication::translate("main", "currentGain"));
+    parser.addOption(gainOption);
+
+    // Help and version options
+    const QCommandLineOption helpOption = parser.addHelpOption();
+    const QCommandLineOption versionOption = parser.addVersionOption();
+
+    if (!parser.parse(QCoreApplication::arguments())) {
+        *errorMessage = parser.errorText();
+        return CommandLineError;
+    }
+
+    if (parser.isSet(versionOption))
+        return CommandLineVersionRequested;
+
+    if (parser.isSet(helpOption))
+        return CommandLineHelpRequested;
+
+    if (parser.isSet(forceOption)) {
+        options->force = true;
+    }
+    else
+    {
+        options->force = false;
+    }
+
+    if (parser.isSet(fileOption)) {
+        QString fname = parser.value(fileOption);
+        if (!fname.endsWith(".json")){
+            fname.append(".json");
+        }
+
+        options->fid = QFileInfo(fname);
+
+        if (!QDir(options->fid.absoluteDir()).exists() ) {
+            *errorMessage = "Selected log file save directory does not exist: " + options->fid.path();
+            return CommandLineError;
+        }
+        if (options->fid.exists() && options->fid.isFile() && !options->force) {
+            *errorMessage = "Selected log file already exists, use the -f option to overwrite:" + options->fid.absoluteFilePath();
+            return CommandLineError;
+        }
+    }
+
+    if (parser.isSet(gainOption)) {
+        const double gain = parser.value(gainOption).toDouble();
+        if (gain < 0) {
+            *errorMessage = "The voltage to current gain cannot be negative,";
+            return CommandLineError;
+        }
+        options->currentGain = gain;
+    }
+
+    return CommandLineOk;
+}
 
 int main(int argc, char *argv[])
 {
@@ -33,27 +119,26 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("Impedance");
     QCoreApplication::setApplicationVersion("1.0");
     QCommandLineParser parser;
+    parser.setApplicationDescription("Automated electrode impedance testing and activation using RHD2000 chips.");
 
-    // A file bname (-f, --file)
-    QCommandLineOption fileOption(QStringList() << "f" << "save-location",
-                                  QCoreApplication::translate("main", "Impedance log save <fname>."),
-                                  QCoreApplication::translate("main", "fname"));
-    parser.addOption(fileOption);
-
-    // The voltageToCurrent gain (-g, --gain)
-    QCommandLineOption gainOption(QStringList() << "g" << "current-gain",
-                                  QCoreApplication::translate("main", "Microamps per volt for plating <currentGain>."),
-                                  QCoreApplication::translate("main", "currentGain"));
-    parser.addOption(gainOption);
-
-    // Process the actual command line arguments given by the user
-    parser.process(app);
-
-    //const QStringList args = parser.positionalArguments();
-    // source is args.at(0), destination is args.at(1)
-
-    QString fname = parser.value(fileOption);
-    double currentGain = parser.value(gainOption).toDouble();
+    CLOptions options;
+    QString errorMessage;
+    switch (parseCommandLine(parser, &options, &errorMessage)) {
+    case CommandLineOk:
+        break;
+    case CommandLineError:
+        fputs(qPrintable(errorMessage), stderr);
+        fputs("\n\n", stderr);
+        fputs(qPrintable(parser.helpText()), stderr);
+        return 1;
+    case CommandLineVersionRequested:
+        printf("%s %s\n", qPrintable(QCoreApplication::applicationName()),
+               qPrintable(QCoreApplication::applicationVersion()));
+        return 0;
+    case CommandLineHelpRequested:
+        parser.showHelp();
+        Q_UNREACHABLE();
+    }
 
     // TODO: The headstage selection and port selection is currently hardcoded
     // and screwed up.
@@ -62,24 +147,27 @@ int main(int argc, char *argv[])
     // handle multiple ports
     // handle 64 chan headstages.
     RHD2000Impedance *impedance = new RHD2000Impedance(Rhd2000EvalBoard::PortA);
-    PlateControl *plateControl = new PlateControl(currentGain);
+    PlateControl *plateControl = new PlateControl(options.currentGain);
+    impedance->configurePlate(plateControl);
     plateControl->setHeadstage(0);
 
     int ch, mode;
-    double plateCurrent, plateTime;
     impedance->setImpedanceTestFrequency(1000);
-    impedance->setRecordingState(true);
-    impedance->setSaveLocation(fname);
+    impedance->setSaveLocation(options.fid.absoluteFilePath());
 
     while(true) {
-        cout << "Select action:" << endl;
-        cout << "   [1]: Manual impedance and plating." << endl;
+
+        cout << endl;
+        cout << "Select an action:" << endl;
+        cout << "   [1]: Manual impedance testing and plating." << endl;
         cout << "   [2]: Single channel impedance check. " << endl;
         cout << "   [3]: All channel impedance check. "  << endl;
-        cout << "   [4]: All channel with plate."  << endl;
-        cout << "   [5]: Change parameters." << endl;
+        cout << "   [4]: All channel impedance check and plating."  << endl;
+        cout << "   [5]: Change test and plating parameters." << endl;
+
+        cout << "   [7]: Change log save location." << endl;
         cout << "   [8]: Clear log." << endl;
-        cout << "   [9]: Save and exit." << endl;
+        cout << "   [9]: Save log and exit program." << endl;
         cin >> mode;
 
         switch(mode) {
@@ -92,15 +180,7 @@ int main(int argc, char *argv[])
             impedance->selectChannel(ch);
             impedance->measureImpedance();
             impedance->printImpedance();
-
-            cout << "Select a plate current (uA)" << endl;
-            cin >> plateCurrent;
-
-            cout << "Select a plate time (s)" << endl;
-            cin >> plateTime;
-
             impedance->plate(plateControl);
-
             impedance->measureImpedance();
             impedance->printImpedance();
 
@@ -141,10 +221,8 @@ int main(int argc, char *argv[])
             cout << "   [3]: Number of test periods. "  << endl;
             cout << "   [4]: Change plate duration." << endl;
             cout << "   [5]: Change plate current." << endl;
-            cout << "   [6]: Change clean duration." << endl;
-            cout << "   [7]: Change clean current." << endl;
-
-            cout << "   [9]: Change log file name." << endl;
+            cout << "   [6]: Change cleaning duration." << endl;
+            cout << "   [7]: Change cleaning current." << endl;
             cin >> parameter;
 
             switch(parameter) {
@@ -179,16 +257,46 @@ int main(int argc, char *argv[])
                 break;
             }
 
-            case 9:
+            case 4:
             {
-                string fn;
-                cout << "Enter a new file name." << endl;
-                cin >> fn;
-                QString fid = QString::fromStdString(fn);
-                impedance->setSaveLocation(fid);
+                int pd;
+                cout << "Enter a new plating duraction in milliseconds." << endl;
+                cin >> pd;
+                plateControl->setPlateDuration(pd);
 
                 break;
             }
+
+            case 5:
+            {
+                int pc;
+                cout << "Enter a new plating current in uA." << endl;
+                cin >> pc;
+                plateControl->setPlateCurrent(pc);
+
+                break;
+            }
+
+            case 6:
+            {
+                int ct;
+                cout << "Enter a new cleaning duraction in milliseconds." << endl;
+                cin >> ct;
+                plateControl->setCleaningDuration(ct);
+
+                break;
+            }
+
+            case 7:
+            {
+                int cc;
+                cout << "Enter a new cleaning current in uA." << endl;
+                cin >> cc;
+                plateControl->setCleaningCurrent(cc);
+
+                break;
+            }
+
             default:
                 cout << "Invalid parameter selection. Try again." << endl;
                 break;
@@ -196,12 +304,23 @@ int main(int argc, char *argv[])
 
             break;
 
+        case 7:
+        {
+            string fn;
+            cout << "Enter a new file name." << endl;
+            cin >> fn;
+            QString fid = QString::fromStdString(fn);
+            impedance->setSaveLocation(fid);
+
+            break;
+        }
 
         case 9:
             if(impedance->saveLog())
                 return 0;
             else
-                cout << "Something went wrong while saving the log." << endl;
+                cout << "Something went wrong while trying to save the log." << endl;
+            cout << "You can specify a new save location in the main menu." << endl;
 
             break;
 
@@ -211,38 +330,3 @@ int main(int argc, char *argv[])
         }
     }
 }
-
-
-// TODO User settable protocol parameters (channels to test/plate)
-//    for (int ch=0; ch < 32; ch++) {
-//
-//        impedance->selectChannel(ch);
-//
-//        // Clean electrode and apply initial plating
-//        // TODO: User settable protocol parameters (plating times, plating currents)
-//        //impedance->plate(0.1,500);
-//        //impedance->plate(-0.05,500);
-//
-//        impedance->measureImpedance();
-//        impedance->printImpedance();
-//
-//
-//        //        // While the impedance of the electrode is not within the desired range
-//        //        // TODO: User settable protocol parameters (target, threshold, plating times, plating currents)
-//        //        while (abs(impedance->getImpedanceMagnitude() - 470e3) > 50e3) {
-//
-//        //            if (impedance->getImpedanceMagnitude() - 470e3 > 0) {
-//
-//        //                // If the impedance is too high
-//        //                impedance->plate(-0.05, 3000);
-//        //            }
-//        //            else {
-//
-//        //                // If the impedance is too low
-//        //                impedance->plate(0.05, 1000);
-//        //            }
-//
-//        //            impedance->measureImpedance();
-//        //            impedance->printImpedance();
-//        //        }
-//    }

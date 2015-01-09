@@ -43,6 +43,7 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     numAverages = 2;
     impedanceFreqValid = false;
     impedanceConfigured = false;
+    platingConfigured = false;
 
     // Get a signal processor, sources, etc
     signalProcessor = new SignalProcessor();
@@ -73,10 +74,6 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
         ttlOut[i] = 0;
     }
 
-    // Data saving
-    recordingOn = false;
-    QTextStream filestream;
-
     // Perform internal hardware and measurement setups
     setupEvalBoard();
     setupAmplifier();
@@ -86,6 +83,11 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     setImpedanceTestFrequency(desiredImpedanceFreq);
     setNumAverages(numAverages);
     setNumPeriods(numPeriods);
+
+    // Write down the parameters
+    QJsonObject paramObject;
+    writeParameters(paramObject);
+    log.append(paramObject);
 
     cout << "done." << endl;
 }
@@ -274,7 +276,7 @@ int RHD2000Impedance::selectChannel(int selectedChannel) {
     if (selectedChannel >= 32 && !rhd2164ChipPresent)
     {
         cout << "Selected channel = " << channel << " but a 64-channel "
-                "chip was not detected." << endl;
+                                                    "chip was not detected." << endl;
         return -1 ;
     }
     else if (selectedChannel >= 64) {
@@ -485,11 +487,10 @@ int RHD2000Impedance::measureImpedance()
             signalChannel->electrodeImpedanceMagnitude = impedanceMagnitude;
             signalChannel->electrodeImpedancePhase = impedancePhase;
 
-            if (recordingOn) {
-                QJsonObject impObject;
-                write(impObject, impedanceMagnitude,  impedancePhase);
-                log.append(impObject);
-            }
+            QJsonObject impObject;
+            write(impObject, impedanceMagnitude,  impedancePhase);
+            log.append(impObject);
+
         }
     }
 
@@ -555,60 +556,6 @@ void RHD2000Impedance::printImpedance()
     cout << "   Phase (deg.): " << signalChannel->electrodeImpedancePhase << endl;
     cout << endl;
 }
-
-//void RHD2000Impedance::openResultsFile(sting fname) {
-
-//    QFile file(fname + ".csv");
-
-//    if (file.open(QFile::WriteOnly|QFile::Truncate)) {
-//      filestream(&file);
-//    }
-//}
-
-//void RHD2000Impedance::closeResultsFile() {
-//    close(filestream);
-//}
-
-//void RHD2000Impedance::writeMeasurement() {
-
-//    if (!channelSelected) {
-//        cout << "Channel has not been selected, so a impedance results cannot "
-//                "be saved." << endl;
-
-//        return;
-//    }
-
-//    // Construct channel name
-//    SignalChannel *signalChannel;
-
-//    switch (usedPort)
-//    {
-//    case Rhd2000EvalBoard::PortA :
-//        signalChannel = &signalSources->signalPort[0].channel[channel];
-//        break;
-//    case Rhd2000EvalBoard::PortB :
-//        signalChannel = &signalSources->signalPort[1].channel[channel];
-//        break;
-//    case Rhd2000EvalBoard::PortC :
-//        signalChannel = &signalSources->signalPort[2].channel[channel];
-//        break;
-//    case Rhd2000EvalBoard::PortD :
-//        signalChannel = &signalSources->signalPort[3].channel[channel];
-//        break;
-//    }
-
-//    if (filestream) {
-
-//        cout << "Impedance test results:" << endl;
-//        cout << "   Channel: " << channel << endl;
-//        cout << "   Test freq. (Hz): " <<  actualImpedanceFreq << endl;
-//        cout << "   Magnitude (ohms): " << signalChannel->electrodeImpedanceMagnitude << endl;
-//        cout << "   Phase (deg.): " << signalChannel->electrodeImpedancePhase << endl;
-//      stream << value1 << "\t" << value2 << "\n"; // this writes first line with two columns
-//      file.close();
-//    }
-
-//}
 
 double RHD2000Impedance::getImpedanceMagnitude() {
 
@@ -953,7 +900,7 @@ void RHD2000Impedance::setupAmplifier()
         signalSources->signalPort[usedPort].enabled = false;
     }
     else if (signalSources->signalPort[usedPort].numAmplifierChannels() !=
-               numChannelsOnPort)
+             numChannelsOnPort)
     {  // if number of channels on port has changed...
 
         // ...clear existing channels...
@@ -1060,26 +1007,26 @@ void RHD2000Impedance::setupAmplifier()
 
 void RHD2000Impedance::setupImpedanceTest() {
 
-// Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
-// of all amplifier channels (32 on each data stream) at three different Cseries values.
-measuredMagnitude.resize(evalBoard->getNumEnabledDataStreams());
-measuredPhase.resize(evalBoard->getNumEnabledDataStreams());
-measuredMagnitudeRaw.resize(evalBoard->getNumEnabledDataStreams());
-measuredPhaseRaw.resize(evalBoard->getNumEnabledDataStreams());
-for (int i = 0; i < evalBoard->getNumEnabledDataStreams(); ++i)
-{
-    measuredMagnitude[i].resize(32);
-    measuredPhase[i].resize(32);
-    measuredMagnitudeRaw[i].resize(32);
-    measuredPhaseRaw[i].resize(32);
-    for (int j = 0; j < 32; ++j)
+    // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
+    // of all amplifier channels (32 on each data stream) at three different Cseries values.
+    measuredMagnitude.resize(evalBoard->getNumEnabledDataStreams());
+    measuredPhase.resize(evalBoard->getNumEnabledDataStreams());
+    measuredMagnitudeRaw.resize(evalBoard->getNumEnabledDataStreams());
+    measuredPhaseRaw.resize(evalBoard->getNumEnabledDataStreams());
+    for (int i = 0; i < evalBoard->getNumEnabledDataStreams(); ++i)
     {
-        measuredMagnitude[i][j].resize(3);
-        measuredPhase[i][j].resize(3);
-        measuredMagnitudeRaw[i][j].resize(3);
-        measuredPhaseRaw[i][j].resize(3);
+        measuredMagnitude[i].resize(32);
+        measuredPhase[i].resize(32);
+        measuredMagnitudeRaw[i].resize(32);
+        measuredPhaseRaw[i].resize(32);
+        for (int j = 0; j < 32; ++j)
+        {
+            measuredMagnitude[i][j].resize(3);
+            measuredPhase[i][j].resize(3);
+            measuredMagnitudeRaw[i][j].resize(3);
+            measuredPhaseRaw[i][j].resize(3);
+        }
     }
-}
 }
 
 // Change the sample rate of the evalboard, update all parameters and AuxCmds that
@@ -1340,6 +1287,16 @@ void RHD2000Impedance::setNumPeriods(int n) {
 
 }
 
+// Set initial plating control port and DAC configuration
+void RHD2000Impedance::configurePlate(PlateControl *pc) {
+
+    // Initial plating port and DAC configuration
+    evalBoard->clearTtlOut();
+    evalBoard->selectDacDataStream(pc->getDacNumber(), 8);
+
+    platingConfigured = true;
+
+}
 
 // This function manipulates the auxilary plating circuit through the pre-specifed
 // digital and analog port.
@@ -1351,23 +1308,66 @@ int RHD2000Impedance::plate(PlateControl *pc) {
         cout << "You must select a channel before plating." << endl;
         return -1;
     }
+    else if (!platingConfigured) {
+        cout << "You must configure plating before plating." << endl;
+        return -1;
+    }
+
+    // Set the plateControl mode to plate
+    pc->setMode(PlateControl::PLATE);
+
+    applyCurrent(pc);
+
+    // Record the plating
+    QJsonObject plateObject;
+    pc->writePlate(plateObject, channel,timer.elapsed());
+    log.append(plateObject);
+
+    return 0;
+}
+
+int RHD2000Impedance::clean(PlateControl *pc) {
+
+    // Make sure that a channel has been selected for plating
+    if (!channelSelected)
+    {
+        cout << "You must select a channel before plating." << endl;
+        return -1;
+    }
+    else if (!platingConfigured) {
+        cout << "You must configure plating before plating." << endl;
+        return -1;
+    }
+
+    // Set the plateControl mode to plate
+    pc->setMode(PlateControl::CLEAN);
+
+    applyCurrent(pc);
+
+    // Record the plating
+    QJsonObject cleanObject;
+    pc->writeClean(cleanObject, channel, timer.elapsed());
+    log.append(cleanObject);
+
+    return 0;
+}
+
+void RHD2000Impedance::applyCurrent(PlateControl *pc) {
 
     // Power up the DAC used for plating control. The gate from the plating source
     // to the electrode will not be opened until the ttl lines are set
-    evalBoard->clearTtlOut();
-    evalBoard->enableDac(pc->dacNumber, true);
-    evalBoard->selectDacDataStream(pc->dacNumber, 8);
-    evalBoard->setDacManual(pc->dacVoltage);
+    evalBoard->enableDac(pc->getDacNumber(), true);
+    evalBoard->setDacManual(pc->getDacVoltage());
 
     // Configure the plate start bit
-    pc->turnPlatingOn();
+    pc->turnCurrentSourceOn();
 
     // Write the ttl configutation to the evalboard
     pc->getTTLState(ttlOut);
     evalBoard->setTtlOut(ttlOut);
 
     // Highjack the SPI port to create very precise plating times
-    evalBoard->setMaxTimeStep(evalBoard->getSampleRate() * pc->plateDurationMilliSec/1000);
+    evalBoard->setMaxTimeStep(evalBoard->getSampleRate() * (unsigned int)pc->getPlatingDuration()/1000);
     evalBoard->run();
     while (evalBoard->isRunning()) {}
 
@@ -1376,10 +1376,10 @@ int RHD2000Impedance::plate(PlateControl *pc) {
     evalBoard->run();
     while (evalBoard->isRunning()) {}
 
-    evalBoard->enableDac(pc->dacNumber, false);
+    evalBoard->enableDac(pc->getDacNumber(), false);
 
-    // Configure the plate stop bit
-    pc->turnPlatingOff();
+    // Configure the 4plate stop bit
+    pc->turnCurrentSourceOff();
 
     // End the plating session
     pc->getTTLState(ttlOut);
@@ -1389,38 +1389,40 @@ int RHD2000Impedance::plate(PlateControl *pc) {
     // since we are using the SPI bus as a timer for that
     evalBoard->flush();
 
-    if (recordingOn) {
-        QJsonObject plateObject;
-        pc->write(plateObject, channel);
-        log.append(plateObject);
-    }
 
-    return 0;
-
-}
-
-void RHD2000Impedance::setRecordingState(bool on) {
-
-    recordingOn = on;
-    if (recordingOn){
-        cout << "Record is on." << endl;
-    }
-    else {
-        cout << "Record is off." << endl;
-    }
-
-
-    // TODO: check if json file is open etc
 }
 
 void RHD2000Impedance::write(QJsonObject &json, double mag, double phase) const
 {
-    // TODO: add measurment time
-    json["time"] = timer.elapsed();
+    json["name"] = "impedance_test_entry";
+    json["time_msec"] = timer.elapsed();
     json["channel"] = channel;
-    json["testFreq"] = actualImpedanceFreq;
-    json["magnitude"] = mag;
-    json["phase"] = phase;
+    json["test_freq"] = actualImpedanceFreq;
+    json["num_test_averages"] = numAverages;
+    json["num_test_periods"] = numPeriods;
+    json["num_settle_periods"] = numSettlePeriods;
+    json["magnitude_ohms"] = mag;
+    json["phase_deg"] = phase;
+}
+
+// Write recording parameters
+void RHD2000Impedance::writeParameters(QJsonObject &json) const {
+
+    QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd-hh-mm-ss-zzz");
+
+    json["name"] = "recording_parameters";
+    json["start_time"] = now;
+    json["port_under_test"] = usedPort;
+    json["sample_freq"] = boardSampleRate;
+    json["notch_filter_enabled"] = boardSampleRate;
+    json["notch_filter_center"] = notchFilterFrequency;
+    json["notch_filter_bandwidth"] = notchFilterBandwidth;
+    json["high_pass_filter_enabled"] = boardSampleRate;
+    json["high_pass_cutoff"] =  highpassFilterFrequency;
+    json["rhd_dsp_enabled"] = dspEnabled;
+    json["rhd_dsp_cutoff"] = actualDspCutoffFreq;
+    json["rhd_lower_bandwidth"] = actualLowerBandwidth;
+    json["rhd_upper_bandwidth"] = actualUpperBandwidth;
 }
 
 void RHD2000Impedance::clearLogFile() {
@@ -1430,24 +1432,24 @@ void RHD2000Impedance::clearLogFile() {
         log.removeFirst();
     }
 
+    // Write down the parameters
+    QJsonObject paramObject;
+    writeParameters(paramObject);
+    log.append(paramObject);
+
     cout << "Log cleared." << endl;
 }
 
 bool RHD2000Impedance::saveLog() {
 
-    //string fname = "temp";"
-    QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd-hh-mm-ss-zzz");
-    QString fid = fname + ".json";
-
-    QFile saveFile(fid);
+    QFile saveFile(logFile.absoluteFilePath());
 
     if (!saveFile.open(QIODevice::WriteOnly)) {
-            qWarning("Couldn't open save file.");
-            return false;
+        qWarning("Couldn't open save file.");
+        return false;
     }
 
     QJsonObject json;
-    json["time"] = now;
     json["log"] = log;
 
     QJsonDocument saveDoc(json);
@@ -1457,10 +1459,31 @@ bool RHD2000Impedance::saveLog() {
     return true;
 }
 
-void RHD2000Impedance::setSaveLocation(QString f) {
+void RHD2000Impedance::setSaveLocation(QString fname) {
 
-    cout << "Log save locations set to " << f.toStdString() << "." << endl;
-    fname = f;
+    if (!fname.endsWith(".json")){
+        fname.append(".json");
+    }
+
+    QFileInfo f = QFileInfo(fname);
+
+    if (!QDir(f.absoluteDir()).exists() ) {
+        cout << "Selected log file save directory does not exist: " + f.path().toStdString() << endl;
+        return;
+    }
+
+    if (f.exists() && f.isFile()) {
+        string overwrite;
+        cout << "Selected log file already exists. Overwrite (y/n)?" << endl;
+        cin >> overwrite;
+        if (!(overwrite == "Y" || overwrite == "y")) {
+            return;
+        }
+    }
+    else {
+        cout << "Log save location set to " << f.absoluteFilePath().toStdString() << "." << endl;
+        logFile = f;
+    }
 }
 
 

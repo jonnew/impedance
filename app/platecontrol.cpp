@@ -23,6 +23,28 @@ PlateControl::PlateControl(double currentGainuAPerVolt)
     // TTL array
     ttl = 0;
 
+    // Set some defaults
+    plateCurrentuA = -1.0;
+    plateDurationMilliSec = 1000;
+    cleaningCurrentuA = 1.0;
+    cleaningDurationMilliSec = 1000;
+    mode = PLATE;
+
+}
+
+int PlateControl::getDacNumber() {
+
+    return dacNumber;
+}
+
+int PlateControl::getPlatingDuration()
+{
+    return plateDurationMilliSec;
+}
+
+int PlateControl::getCleaningDuration()
+{
+    return cleaningDurationMilliSec;
 }
 
 int PlateControl::setHeadstage(int rhd2000AmpNumber) {
@@ -42,20 +64,16 @@ int PlateControl::setHeadstage(int rhd2000AmpNumber) {
 
 }
 
-void PlateControl::setPolarity(bool polarity) {
+void PlateControl::setPolarity(bool pol) {
 
-    ttl = ((ttl & ~polarityMask) | polarity << polarityBit);
-
-    if (polarity) {
-        platePolarity = 1;
-        cout << "Plating polarity set to +." << endl;
+    if (pol) {
+        polarity = 1;
     }
     else {
-        platePolarity = -1;
-        cout << "Plating polarity set to -." << endl;
+        polarity = -1;
     }
 
-
+    ttl = ((ttl & ~polarityMask) | pol << polarityBit);
 }
 
 void PlateControl::setPlateDuration(int durationMilliSec) {
@@ -72,11 +90,25 @@ void PlateControl::setPlateDuration(int durationMilliSec) {
     }
 }
 
-void PlateControl::turnPlatingOn() {
+void PlateControl::setCleaningDuration(int durationMilliSec) {
+
+    if (durationMilliSec > 0) {
+
+        cleaningDurationMilliSec = durationMilliSec;
+        cout << "Electrode cleaning duration set to " << cleaningDurationMilliSec << " ms." << endl;
+    }
+    else {
+        cleaningDurationMilliSec = 1000;
+        qWarning("Cleaning duration cannot be negative.");
+        cout << "Cleaning duration set to 1000 ms." << endl;
+    }
+}
+
+void PlateControl::turnCurrentSourceOn() {
     ttl = ((ttl & ~plateMask) | 0x0001 << plateBit);
 }
 
-void PlateControl::turnPlatingOff() {
+void PlateControl::turnCurrentSourceOff() {
     ttl = ((ttl & ~plateMask) | 0x0000 << plateBit);
 }
 
@@ -93,40 +125,100 @@ int* PlateControl::getTTLState(int ttlState[]) {
 
 }
 
-void PlateControl::write(QJsonObject &json, int channel) const {
-
-
-    json["channel"] = channel;
-    json["polarity"] = platePolarity;
-    json["uAPerVolt"] = uAPerVolt;
-    json["durationMilliSec"] = (int)plateDurationMilliSec;
-    json["currentMicroA"] =  plateCurrentuA;
-
-}
-
 void PlateControl::setPlateCurrent(double currentuA) {
+
     // Set the current
     plateCurrentuA = currentuA;
-
-    // Set the polarity
-    if (plateCurrentuA < 0) {
-        setPolarity(false);
-    }
-    else {
-        setPolarity(true);
-    }
-
-    // Set the DAC voltage
-    plateCurrentuA = fabs( plateCurrentuA);
-    dacVoltage = 32768 + qFloor((32768/3.3) *  plateCurrentuA/uAPerVolt);
-
-    if (dacVoltage > 65535) {
-        dacVoltage = 65535;
-        plateCurrentuA = 3.3 * uAPerVolt;
-        qWarning("The requested plating current is too high."
-                 "It has been set to the maximum value of %f.", plateCurrentuA);
-    }
-    else {
-        cout << "Plating current set to " << currentuA << " uA" << endl;
-    }
 }
+
+void PlateControl::setCleaningCurrent(double currentuA) {
+    // Set the current
+    cleaningCurrentuA = currentuA;
+}
+
+int PlateControl::getDacVoltage(){
+
+    switch(mode) {
+
+    case PLATE:
+
+        // Set the polarity
+        if (plateCurrentuA < 0) {
+
+            setPolarity(false);
+        }
+        else {
+            setPolarity(true);
+        }
+
+        // Convert to a DAC voltage
+        dacVoltage = 32768 + qFloor((32768/3.3) *  fabs(plateCurrentuA)/uAPerVolt);
+
+        if (dacVoltage > 65535) {
+            dacVoltage = 65535;
+            plateCurrentuA = (double)polarity * 3.3 * uAPerVolt;
+            qWarning("The requested plating current is too high."
+                     "It has been set to %f.", plateCurrentuA);
+        }
+        else {
+            cout << "Plating current set to " << plateCurrentuA << " uA" << endl;
+        }
+
+        break;
+
+    case CLEAN:
+
+        // Set the polarity
+        if (cleaningCurrentuA < 0) {
+
+            setPolarity(false);
+        }
+        else {
+            setPolarity(true);
+        }
+
+        // Convert to a DAC voltage
+        dacVoltage = 32768 + qFloor((32768/3.3) *  cleaningCurrentuA/uAPerVolt);
+
+        if (dacVoltage > 65535) {
+            dacVoltage = 65535;
+            cleaningCurrentuA = (double)polarity * 3.3 * uAPerVolt;
+            qWarning("The requested cleaning current is too high."
+                     "It has been set to %f.", cleaningCurrentuA);
+        }
+        else {
+            cout << "Cleaning current set to " << cleaningCurrentuA << " uA" << endl;
+        }
+
+        break;
+    }
+
+    return dacVoltage;
+}
+
+void PlateControl::setMode(modes newMode) {
+
+    mode = newMode;
+}
+
+void PlateControl::writePlate(QJsonObject &json, int channel, int time) const {
+
+    json["name"] = "plating_entry";
+    json["channel"] = channel;
+    json["durationMilliSec"] = (int)plateDurationMilliSec;
+    json["currentMicroA"] =  plateCurrentuA;
+    json["time"] = time;
+
+}
+
+void PlateControl::writeClean(QJsonObject &json, int channel, int time) const {
+
+    json["name"] = "cleaning_entry";
+    json["channel"] = channel;
+    json["durationMilliSec"] = (int)cleaningDurationMilliSec;
+    json["currentMicroA"] =  cleaningCurrentuA;
+    json["time"] = time;
+
+}
+
+

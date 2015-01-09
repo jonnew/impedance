@@ -14,6 +14,8 @@
 #include <QDate>
 #include <QJsonDocument>
 #include <string>
+#include <QDir>
+#include <QFileInfo>
 
 // Included class objects
 class Rhd2000EvalBoard;
@@ -44,15 +46,17 @@ public:
     double getImpedanceMagnitude(void);
     void setNumAverages(int n);
     void setNumPeriods(int n);
+    void configurePlate(PlateControl *pc);
     int plate(PlateControl *pc);
+    int clean(PlateControl *pc);
 
-    void setRecordingState(bool on);
     bool saveLog(void);
     void clearLogFile(void);
     void setSaveLocation(QString f);
 
     // This structure exposes all channel information and impedance results
     SignalSources *signalSources;
+
 
 
 
@@ -80,12 +84,14 @@ private:
                                        double boardSampleRate);
 
 
+    void applyCurrent(PlateControl *pc);
     void write(QJsonObject &json, double mag, double phase) const;
+    void writeParameters(QJsonObject &json) const;
 
     // Impedance/plate log array
     QTime timer;
     QJsonArray log;
-    QString fname;
+    QFileInfo logFile;
 
     // Class-wide objects
     Rhd2000EvalBoard *evalBoard;
@@ -126,9 +132,9 @@ private:
     unsigned int numUsbBlocksToRead;
 
     // Parameters and data used to derive impedance measurements
-    bool recordingOn;
     int channel;
     bool impedanceConfigured;
+    bool platingConfigured;
     bool channelSelected;
     int numAverages;
     int numPeriods;

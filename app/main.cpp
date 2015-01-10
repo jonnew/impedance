@@ -42,17 +42,13 @@ enum CommandLineParseResult
 CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *options, QString *errorMessage)
 {
 
+    parser.addPositionalArgument("log", QCoreApplication::translate("main", "Path to file where log will be saved."));
+
     // A file bname (-f, --force)
     const QCommandLineOption forceOption(QStringList() << "f" << "force",
-                                        QCoreApplication::translate("main", "Force log file overwrite if applicable."));
+                                         QCoreApplication::translate("main", "Force log file overwrite if applicable."));
 
     parser.addOption(forceOption);
-
-    // A file bname (-l, --log)
-    const QCommandLineOption fileOption(QStringList() << "l" << "log",
-                                        QCoreApplication::translate("main", "Log file save location."),
-                                        QCoreApplication::translate("main", "Save location"));
-    parser.addOption(fileOption);
 
     // The voltageToCurrent gain (-g, --gain)
     const QCommandLineOption gainOption(QStringList() << "g" << "gain",
@@ -83,23 +79,33 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *o
         options->force = false;
     }
 
-    if (parser.isSet(fileOption)) {
-        QString fname = parser.value(fileOption);
-        if (!fname.endsWith(".json")){
-            fname.append(".json");
-        }
 
-        options->fid = QFileInfo(fname);
-
-        if (!QDir(options->fid.absoluteDir()).exists() ) {
-            *errorMessage = "Selected log file save directory does not exist: " + options->fid.path();
-            return CommandLineError;
-        }
-        if (options->fid.exists() && options->fid.isFile() && !options->force) {
-            *errorMessage = "Selected log file already exists, use the -f option to overwrite: " + options->fid.absoluteFilePath();
-            return CommandLineError;
-        }
+    const QStringList positionalArguments = parser.positionalArguments();
+    if (positionalArguments.isEmpty()) {
+        *errorMessage = "The 'log save location' argument is missing.";
+        return CommandLineError;
     }
+    if (positionalArguments.size() > 1) {
+        *errorMessage = "Several 'log' arguments specified.";
+        return CommandLineError;
+    }
+
+    QString fname = positionalArguments.first();
+    if (!fname.endsWith(".json")){
+        fname.append(".json");
+    }
+
+    options->fid = QFileInfo(fname);
+
+    if (!QDir(options->fid.absoluteDir()).exists() ) {
+        *errorMessage = "Selected log file save directory does not exist: " + options->fid.path();
+        return CommandLineError;
+    }
+    if (options->fid.exists() && options->fid.isFile() && !options->force) {
+        *errorMessage = "Selected log file already exists, use the -f option to overwrite: " + options->fid.absoluteFilePath();
+        return CommandLineError;
+    }
+
 
     if (parser.isSet(gainOption)) {
         const double gain = parser.value(gainOption).toDouble();
@@ -108,6 +114,11 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *o
             return CommandLineError;
         }
         options->currentGain = gain;
+    }
+    else
+    {
+        cout << "Warning: not current gain value provided. Assuming 10uA/3.3V." << endl;
+        options->currentGain = 10.0/3.3;
     }
 
     return CommandLineOk;
@@ -153,169 +164,206 @@ int main(int argc, char *argv[])
 
     int ch, mode;
     impedance->setImpedanceTestFrequency(1000);
-    impedance->setSaveLocation(options.fid.absoluteFilePath());
+    impedance->setSaveLocation(options.fid.absoluteFilePath(),true);
 
     while(true) {
 
         cout << endl;
         cout << "Select an action:" << endl;
-        cout << "   [1]: Manual impedance testing and plating." << endl;
-        cout << "   [2]: Single channel impedance check. " << endl;
-        cout << "   [3]: All channel impedance check. "  << endl;
-        cout << "   [4]: All channel impedance check and plating."  << endl;
-        cout << "   [5]: Change test and plating parameters." << endl;
-
-        cout << "   [7]: Change log save location." << endl;
-        cout << "   [8]: Clear log." << endl;
-        cout << "   [9]: Save log and exit program." << endl;
+        cout << "   [1]: Single channel impedance test." << endl;
+        cout << "   [2]: Single channel plate. " << endl;
+        cout << "   [3]: Single channel electrode clean. " << endl;
+        cout << "   [4]: All channel impedance check. "  << endl;
+        cout << "   [5]: All channel plate."  << endl;
+        cout << "   [6]: All channel electrode clean."  << endl;
+        cout << "   [7]: Automated impedance test and electrode activation." << endl;
+        cout << "   [8]: Change impedance test and plating parameters." << endl;
+        cout << "   [9]: Change log save location." << endl;
+        cout << "   [10]: Clear log." << endl;
+        cout << "   [11]: Save log and exit program." << endl;
+        cout << "   [12]: Exit without saving." << endl;
         cin >> mode;
 
         switch(mode) {
 
         case 1:
 
-
             cout << "Select a channel." << endl;
             cin >> ch;
             impedance->selectChannel(ch);
             impedance->measureImpedance();
             impedance->printImpedance();
-            impedance->plate(plateControl);
-            impedance->measureImpedance();
-            impedance->printImpedance();
-
             break;
+
         case 2:
 
+            cout << "Select a channel." << endl;
+            cin >> ch;
+            impedance->selectChannel(ch);
+            impedance->plate(plateControl);
+            break;
+
+        case 3:
 
             cout << "Select a channel." << endl;
             cin >> ch;
             impedance->selectChannel(ch);
-            impedance->measureImpedance();
-            impedance->printImpedance();
+            impedance->clean(plateControl);
             break;
-        case 3:
-            for (int ch=0; ch < 32; ch++) {
 
-                impedance->selectChannel(ch);
-                impedance->measureImpedance();
-                impedance->printImpedance();
-            }
-            break;
         case 4:
+
+            // TODO: Fix hardcoded number of channels, ports,etc
             for (int ch=0; ch < 32; ch++) {
 
                 impedance->selectChannel(ch);
                 impedance->measureImpedance();
                 impedance->printImpedance();
-                impedance->plate(plateControl);
             }
             break;
 
         case 5:
 
-            int parameter;
-            cout << "Select parameter to modify:" << endl;
-            cout << "   [1]: Test frequency." << endl;
-            cout << "   [2]: Number of averages. " << endl;
-            cout << "   [3]: Number of test periods. "  << endl;
-            cout << "   [4]: Change plate duration." << endl;
-            cout << "   [5]: Change plate current." << endl;
-            cout << "   [6]: Change cleaning duration." << endl;
-            cout << "   [7]: Change cleaning current." << endl;
-            cin >> parameter;
+            // TODO: Fix hardcoded number of channels, ports,etc
+            for (int ch=0; ch < 32; ch++) {
 
-            switch(parameter) {
-
-            case 1:
-            {
-                double freq;
-                cout << "Enter a test frequency." << endl;
-                cin >> freq;
-                impedance->setImpedanceTestFrequency(freq);
-
-                break;
+                impedance->selectChannel(ch);
+                impedance->plate(plateControl);
             }
-
-            case 2:
-            {
-                int na;
-                cout << "Enter a number of aveages for each measurement." << endl;
-                cin >> na;
-                impedance->setNumAverages(na);
-
-                break;
-            }
-
-            case 3:
-            {
-                int np;
-                cout << "Enter a number of test waveform periods for each measurement." << endl;
-                cin >> np;
-                impedance->setNumPeriods(np);
-
-                break;
-            }
-
-            case 4:
-            {
-                int pd;
-                cout << "Enter a new plating duraction in milliseconds." << endl;
-                cin >> pd;
-                plateControl->setPlateDuration(pd);
-
-                break;
-            }
-
-            case 5:
-            {
-                int pc;
-                cout << "Enter a new plating current in uA." << endl;
-                cin >> pc;
-                plateControl->setPlateCurrent(pc);
-
-                break;
-            }
-
-            case 6:
-            {
-                int ct;
-                cout << "Enter a new cleaning duraction in milliseconds." << endl;
-                cin >> ct;
-                plateControl->setCleaningDuration(ct);
-
-                break;
-            }
-
-            case 7:
-            {
-                int cc;
-                cout << "Enter a new cleaning current in uA." << endl;
-                cin >> cc;
-                plateControl->setCleaningCurrent(cc);
-
-                break;
-            }
-
-            default:
-                cout << "Invalid parameter selection. Try again." << endl;
-                break;
-            }
-
             break;
 
-        case 7:
+        case 6:
+
+            // TODO: Fix hardcoded number of channels, ports,etc
+            for (int ch=0; ch < 32; ch++) {
+
+                impedance->selectChannel(ch);
+                impedance->clean(plateControl);
+            }
+            break;
+
+        case 8:
+        {
+            bool exitParamsDialog = false;
+            do {
+
+                int parameter;
+                cout << endl;
+                cout << "Select parameter to modify:" << endl;
+                cout << "   [1]: Test frequency." << endl;
+                cout << "   [2]: Number of averages. " << endl;
+                cout << "   [3]: Number of test periods. "  << endl;
+                cout << "   [4]: Change plate duration." << endl;
+                cout << "   [5]: Change plate current." << endl;
+                cout << "   [6]: Change cleaning duration." << endl;
+                cout << "   [7]: Change cleaning current." << endl;
+                cout << "   [10]: Exit to main menu." << endl;
+                cin >> parameter;
+
+                switch(parameter) {
+
+                case 1:
+                {
+                    double freq;
+                    cout << "Enter an impedance test frequency (Hz)." << endl;
+                    cin >> freq;
+                    impedance->setImpedanceTestFrequency(freq);
+
+                    break;
+                }
+
+                case 2:
+                {
+                    int na;
+                    cout << "Enter a number of aveages for each impedance measurement." << endl;
+                    cin >> na;
+                    impedance->setNumAverages(na);
+
+                    break;
+                }
+
+                case 3:
+                {
+                    int np;
+                    cout << "Enter a number of test waveform periods for each measurement." << endl;
+                    cin >> np;
+                    impedance->setNumPeriods(np);
+
+                    break;
+                }
+
+                case 4:
+                {
+                    int pd;
+                    cout << "Enter a new plating duration (msec)." << endl;
+                    cin >> pd;
+                    plateControl->setPlateDuration(pd);
+
+                    break;
+                }
+
+                case 5:
+                {
+                    int pc;
+                    cout << "Enter a new plating current (uA)." << endl;
+                    cin >> pc;
+                    plateControl->setPlateCurrent(pc);
+
+                    break;
+                }
+
+                case 6:
+                {
+                    int ct;
+                    cout << "Enter a new cleaning duration (msec)." << endl;
+                    cin >> ct;
+                    plateControl->setCleaningDuration(ct);
+
+                    break;
+                }
+
+                case 7:
+                {
+                    int cc;
+                    cout << "Enter a new cleaning current (uA)" << endl;
+                    cin >> cc;
+                    plateControl->setCleaningCurrent(cc);
+                }
+
+                case 10:
+                {
+                    exitParamsDialog = true;
+                    break;
+                }
+
+
+                default:
+
+
+                    cout << "Invalid parameter selection. Try again." << endl;
+                    break;
+                }
+            } while(!exitParamsDialog);
+
+            break;
+        }
+        case 9:
         {
             string fn;
             cout << "Enter a new file name." << endl;
             cin >> fn;
             QString fid = QString::fromStdString(fn);
-            impedance->setSaveLocation(fid);
+            impedance->setSaveLocation(fid, false);
 
             break;
         }
+        case 10:
+        {
+            impedance->clearLogFile();
+            break;
+        }
 
-        case 9:
+        case 11:
             if(impedance->saveLog())
                 return 0;
             else
@@ -324,6 +372,11 @@ int main(int argc, char *argv[])
 
             break;
 
+        case 12:
+
+            return 0;
+
+            break;
         default:
             cout << "Invalid mode selection. Try again." << endl;
             break;

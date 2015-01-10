@@ -52,13 +52,10 @@ public:
 
     bool saveLog(void);
     void clearLogFile(void);
-    void setSaveLocation(QString f);
+    void setSaveLocation(QString f, bool overrideExistingFile);
 
     // This structure exposes all channel information and impedance results
     SignalSources *signalSources;
-
-
-
 
 private:
 

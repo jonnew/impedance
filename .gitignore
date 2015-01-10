@@ -9,3 +9,6 @@
 build/**
 **/*build*
 Makefile
+
+# QT Creator crap
+*.pro.user*

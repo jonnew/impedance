@@ -20,7 +20,7 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     timer.start();
 
     // Initialized default parameters
-    cout << "Intializing internal default parameters...";
+    cout << "Intializing hardware and default settings" << endl;
 
     // define the port to which the RHD2000 is attached
     usedPort = port; //0 = A, 1 = B, etc
@@ -39,8 +39,8 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     // Default electrode impedance measurement frequency
     desiredImpedanceFreq = 1000.0;
     actualImpedanceFreq = 0.0;
-    numPeriods = 10;
-    numAverages = 2;
+    numPeriods = 20;
+    numAverages = 3;
     impedanceFreqValid = false;
     impedanceConfigured = false;
     platingConfigured = false;
@@ -74,6 +74,7 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
         ttlOut[i] = 0;
     }
 
+
     // Perform internal hardware and measurement setups
     setupEvalBoard();
     setupAmplifier();
@@ -89,7 +90,8 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     writeParameters(paramObject);
     log.append(paramObject);
 
-    cout << "done." << endl;
+    cout << "Intialization complete." << endl;
+
 }
 
 // Create auxiliary commands required to perform impedance testing. This function
@@ -276,7 +278,7 @@ int RHD2000Impedance::selectChannel(int selectedChannel) {
     if (selectedChannel >= 32 && !rhd2164ChipPresent)
     {
         cout << "Selected channel = " << channel << " but a 64-channel "
-                                                    "chip was not detected." << endl;
+                "chip was not detected." << endl;
         return -1 ;
     }
     else if (selectedChannel >= 64) {
@@ -1302,6 +1304,8 @@ void RHD2000Impedance::configurePlate(PlateControl *pc) {
 // digital and analog port.
 int RHD2000Impedance::plate(PlateControl *pc) {
 
+    cout << "Plating channel " << channel << " started." << endl;
+
     // Make sure that a channel has been selected for plating
     if (!channelSelected)
     {
@@ -1323,10 +1327,15 @@ int RHD2000Impedance::plate(PlateControl *pc) {
     pc->writePlate(plateObject, channel,timer.elapsed());
     log.append(plateObject);
 
+    cout << "Plating finished." << endl;
+
+
     return 0;
 }
 
 int RHD2000Impedance::clean(PlateControl *pc) {
+
+    cout << "Cleaning channel " << channel << " started." << endl;
 
     // Make sure that a channel has been selected for plating
     if (!channelSelected)
@@ -1348,6 +1357,8 @@ int RHD2000Impedance::clean(PlateControl *pc) {
     QJsonObject cleanObject;
     pc->writeClean(cleanObject, channel, timer.elapsed());
     log.append(cleanObject);
+
+    cout << "Cleaning finished." << endl;
 
     return 0;
 }
@@ -1394,7 +1405,7 @@ void RHD2000Impedance::applyCurrent(PlateControl *pc) {
 
 void RHD2000Impedance::write(QJsonObject &json, double mag, double phase) const
 {
-    json["name"] = "impedance_test_entry";
+    json["name"] =  (QString)"impedance_test_entry";
     json["time_msec"] = timer.elapsed();
     json["channel"] = channel;
     json["test_freq"] = actualImpedanceFreq;
@@ -1410,7 +1421,7 @@ void RHD2000Impedance::writeParameters(QJsonObject &json) const {
 
     QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd-hh-mm-ss-zzz");
 
-    json["name"] = "recording_parameters";
+    json["name"] =  (QString)"recording_parameters";
     json["start_time"] = now;
     json["port_under_test"] = usedPort;
     json["sample_freq"] = boardSampleRate;
@@ -1459,7 +1470,7 @@ bool RHD2000Impedance::saveLog() {
     return true;
 }
 
-void RHD2000Impedance::setSaveLocation(QString fname) {
+void RHD2000Impedance::setSaveLocation(QString fname, bool overrideExistingFile) {
 
     if (!fname.endsWith(".json")){
         fname.append(".json");
@@ -1472,7 +1483,7 @@ void RHD2000Impedance::setSaveLocation(QString fname) {
         return;
     }
 
-    if (f.exists() && f.isFile()) {
+    if (!overrideExistingFile && f.exists() && f.isFile()) {
         string overwrite;
         cout << "Selected log file already exists. Overwrite (y/n)?" << endl;
         cin >> overwrite;
@@ -1485,12 +1496,6 @@ void RHD2000Impedance::setSaveLocation(QString fname) {
         logFile = f;
     }
 }
-
-
-
-
-
-
 
 
 

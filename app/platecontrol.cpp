@@ -203,7 +203,7 @@ void PlateControl::setMode(modes newMode) {
 
 void PlateControl::writePlate(QJsonObject &json, int channel, int time) const {
 
-    json["name"] = "plating_entry";
+    json["name"] = (QString)"plating_entry";
     json["channel"] = channel;
     json["durationMilliSec"] = (int)plateDurationMilliSec;
     json["currentMicroA"] =  plateCurrentuA;
@@ -213,7 +213,7 @@ void PlateControl::writePlate(QJsonObject &json, int channel, int time) const {
 
 void PlateControl::writeClean(QJsonObject &json, int channel, int time) const {
 
-    json["name"] = "cleaning_entry";
+    json["name"] =  (QString)"cleaning_entry";
     json["channel"] = channel;
     json["durationMilliSec"] = (int)cleaningDurationMilliSec;
     json["currentMicroA"] =  cleaningCurrentuA;

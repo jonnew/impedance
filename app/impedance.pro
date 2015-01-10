@@ -14,7 +14,7 @@ TEMPLATE = app
 CONFIG   += console
 CONFIG   -= app_bundle
 
-#LIBS=-ldl
+LIBS=-ldl
 
 SOURCES += main.cpp \
     okFrontPanelDLL.cpp \
@@ -30,8 +30,8 @@ SOURCES += main.cpp \
     platecontrol.cpp
 
 OTHER_FILES += \
-    okFrontPanel.dll\
-#    okFrontPanel.so \
+#    okFrontPanel.dll\
+    okFrontPanel.so \
     main.bit
 
 HEADERS += \

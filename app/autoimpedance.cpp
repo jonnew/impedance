@@ -16,38 +16,27 @@ AutoImpedance::AutoImpedance(double targetImpedanceOhms, double maxErrorPercent,
 // scheme would work a lot better, but lets just try this to start
 bool AutoImpedance::autoPlate(RHD2000Impedance *imp, PlateControl *plateControl, ImpedanceLog *log)
 {
-    imp->measureImpedance(log);
-    double currentImp = imp->getImpedanceMagnitude();
-    double errorPerc = 100.0 * (targetImpedance - currentImp)/targetImpedance;
 
-    // Clear the autoplate session log
+    // Create a new log to capture this autoplating session
     sessionLog = new ImpedanceLog();
 
     int n = 0;
     while(fabs(errorPerc) > allowableErrorPercent && n < maxTries) {
 
-        if (errorPerc < 0) {
-            imp->plate(plateControl, sessionLog);
-
-//            QJsonObject jObject;
-//            plateControl->writePlate(jObject, imp->getChannel(),imp->getElapsedTime());
-//            autoPlateLog.append(jObject);
-
-        }
-        else if (errorPerc > 0) {
-            imp->clean(plateControl,sessionLog);
-
-//            QJsonObject jObject;
-//            plateControl->writeClean(jObject, imp->getChannel(),imp->getElapsedTime());
-//            autoPlateLog.append(jObject);
-        }
-
         imp->measureImpedance(sessionLog);
         imp->printImpedance();
         double currentImp = imp->getImpedanceMagnitude();
         double errorPerc = 100.0 * (targetImpedance - currentImp)/targetImpedance;
-        n++;
 
+        if (errorPerc < 0) {
+            imp->plate(plateControl, sessionLog);
+
+        }
+        else if (errorPerc > 0) {
+            imp->clean(plateControl,sessionLog);
+        }
+
+        n++;
     }
 
     plateSuccess = fabs(errorPerc) < allowableErrorPercent;

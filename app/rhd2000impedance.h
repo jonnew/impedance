@@ -7,15 +7,9 @@
 #include "rhd2000registers.h"
 #include "rhd2000datablock.h"
 #include "platecontrol.h"
-
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QFile>
-#include <QDate>
-#include <QJsonDocument>
+#include "impedancelog.h"
 #include <string>
-#include <QDir>
-#include <QFileInfo>
+
 
 // Included class objects
 class Rhd2000EvalBoard;
@@ -26,6 +20,7 @@ class SignalGroup;
 class SignalChannel;
 class PlateControl;
 class Rhd2000DataBlock;
+class ImpedanceLog;
 
 using namespace std;
 
@@ -35,27 +30,29 @@ class RHD2000Impedance
 public:
 
     // Imdepdance measurement class
-    RHD2000Impedance(Rhd2000EvalBoard::BoardPort port);
+    RHD2000Impedance(Rhd2000EvalBoard::BoardPort port, ImpedanceLog *log);
 
     // User-twidlable
-    int selectChannel(int selectedChannel);
+    int setChannel(int selectedChannel);
+    int getChannel();
     void setImpedanceTestFrequency(double Fs);
-    int measureImpedance(void);
+    int measureImpedance(ImpedanceLog *log);
     void printImpedance(void);
     double getImpedancePhase(void);
     double getImpedanceMagnitude(void);
     void setNumAverages(int n);
     void setNumPeriods(int n);
     void configurePlate(PlateControl *pc);
-    int plate(PlateControl *pc);
-    int clean(PlateControl *pc);
+    int plate(PlateControl *pc, ImpedanceLog *log);
+    int clean(PlateControl *pc, ImpedanceLog *log);
+    void writeParameters(QJsonObject &json) const;
+    void write(QJsonObject &json, double mag, double phase, int timeMsec) const;
 
-    bool saveLog(void);
-    void clearLogFile(void);
-    void setSaveLocation(QString f, bool overrideExistingFile);
 
     // This structure exposes all channel information and impedance results
     SignalSources *signalSources;
+
+
 
 private:
 
@@ -82,13 +79,9 @@ private:
 
 
     void applyCurrent(PlateControl *pc);
-    void write(QJsonObject &json, double mag, double phase) const;
-    void writeParameters(QJsonObject &json) const;
 
-    // Impedance/plate log array
-    QTime timer;
-    QJsonArray log;
-    QFileInfo logFile;
+
+
 
     // Class-wide objects
     Rhd2000EvalBoard *evalBoard;

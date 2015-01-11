@@ -19,8 +19,9 @@
 #include <QCommandLineParser>
 #include <QFileInfo>
 #include <QDir>
-
+#include "autoimpedance.h"
 #include "rhd2000impedance.h"
+#include "impedancelog.h"
 
 using namespace std;
 
@@ -42,7 +43,7 @@ enum CommandLineParseResult
 CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *options, QString *errorMessage)
 {
 
-    parser.addPositionalArgument("log", QCoreApplication::translate("main", "Path to file where log will be saved."));
+    parser.addPositionalArgument("log", QCoreApplication::translate("main", "File where the log will be saved."));
 
     // A file bname (-f, --force)
     const QCommandLineOption forceOption(QStringList() << "f" << "force",
@@ -82,7 +83,7 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *o
 
     const QStringList positionalArguments = parser.positionalArguments();
     if (positionalArguments.isEmpty()) {
-        *errorMessage = "The 'log save location' argument is missing.";
+        *errorMessage = "A save location for the log file was not provided.";
         return CommandLineError;
     }
     if (positionalArguments.size() > 1) {
@@ -102,10 +103,9 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *o
         return CommandLineError;
     }
     if (options->fid.exists() && options->fid.isFile() && !options->force) {
-        *errorMessage = "Selected log file already exists, use the -f option to overwrite: " + options->fid.absoluteFilePath();
+        *errorMessage = "Selected log file already exists, use the -f option if you wish to overwrite: " + options->fid.absoluteFilePath();
         return CommandLineError;
     }
-
 
     if (parser.isSet(gainOption)) {
         const double gain = parser.value(gainOption).toDouble();
@@ -117,7 +117,7 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, CLOptions *o
     }
     else
     {
-        cout << "Warning: not current gain value provided. Assuming 10uA/3.3V." << endl;
+        cout << "Warning: no current gain was not provided. Assuming 10uA/3.3V." << endl;
         options->currentGain = 10.0/3.3;
     }
 
@@ -157,14 +157,17 @@ int main(int argc, char *argv[])
     // Handle 2X32 chan headstages
     // handle multiple ports
     // handle 64 chan headstages.
-    RHD2000Impedance *impedance = new RHD2000Impedance(Rhd2000EvalBoard::PortA);
     PlateControl *plateControl = new PlateControl(options.currentGain);
+    AutoImpedance *autoImpedance = new AutoImpedance(350.0e3, 100.0 * 50.0e3/350.0e3, 5);
+    ImpedanceLog *logger = new ImpedanceLog(options.fid);
+    RHD2000Impedance *impedance = new RHD2000Impedance(Rhd2000EvalBoard::PortA, logger);
+
     impedance->configurePlate(plateControl);
     plateControl->setHeadstage(0);
 
     int ch, mode;
     impedance->setImpedanceTestFrequency(1000);
-    impedance->setSaveLocation(options.fid.absoluteFilePath(),true);
+
 
     while(true) {
 
@@ -180,8 +183,8 @@ int main(int argc, char *argv[])
         cout << "   [8]: Change impedance test and plating parameters." << endl;
         cout << "   [9]: Change log save location." << endl;
         cout << "   [10]: Clear log." << endl;
-        cout << "   [11]: Save log and exit program." << endl;
-        cout << "   [12]: Exit without saving." << endl;
+        cout << "   [11]: Exit without saving." << endl;
+        cout << "   [12]: Save log and exit program." << endl;
         cin >> mode;
 
         switch(mode) {
@@ -190,8 +193,8 @@ int main(int argc, char *argv[])
 
             cout << "Select a channel." << endl;
             cin >> ch;
-            impedance->selectChannel(ch);
-            impedance->measureImpedance();
+            impedance->setChannel(ch);
+            impedance->measureImpedance(logger);
             impedance->printImpedance();
             break;
 
@@ -199,16 +202,16 @@ int main(int argc, char *argv[])
 
             cout << "Select a channel." << endl;
             cin >> ch;
-            impedance->selectChannel(ch);
-            impedance->plate(plateControl);
+            impedance->setChannel(ch);
+            impedance->plate(plateControl, logger);
             break;
 
         case 3:
 
             cout << "Select a channel." << endl;
             cin >> ch;
-            impedance->selectChannel(ch);
-            impedance->clean(plateControl);
+            impedance->setChannel(ch);
+            impedance->clean(plateControl, logger);
             break;
 
         case 4:
@@ -216,8 +219,8 @@ int main(int argc, char *argv[])
             // TODO: Fix hardcoded number of channels, ports,etc
             for (int ch=0; ch < 32; ch++) {
 
-                impedance->selectChannel(ch);
-                impedance->measureImpedance();
+                impedance->setChannel(ch);
+                impedance->measureImpedance(logger);
                 impedance->printImpedance();
             }
             break;
@@ -227,8 +230,8 @@ int main(int argc, char *argv[])
             // TODO: Fix hardcoded number of channels, ports,etc
             for (int ch=0; ch < 32; ch++) {
 
-                impedance->selectChannel(ch);
-                impedance->plate(plateControl);
+                impedance->setChannel(ch);
+                impedance->plate(plateControl, logger);
             }
             break;
 
@@ -237,11 +240,20 @@ int main(int argc, char *argv[])
             // TODO: Fix hardcoded number of channels, ports,etc
             for (int ch=0; ch < 32; ch++) {
 
-                impedance->selectChannel(ch);
-                impedance->clean(plateControl);
+                impedance->setChannel(ch);
+                impedance->clean(plateControl, logger);
             }
             break;
 
+        case 7:
+        {
+            cout << "Select a channel." << endl;
+            cin >> ch;
+            impedance->setChannel(ch);
+            autoImpedance->autoPlate(impedance, plateControl, logger);
+
+            break;
+        }
         case 8:
         {
             bool exitParamsDialog = false;
@@ -353,18 +365,24 @@ int main(int argc, char *argv[])
             cout << "Enter a new file name." << endl;
             cin >> fn;
             QString fid = QString::fromStdString(fn);
-            impedance->setSaveLocation(fid, false);
+            logger->setSaveLocation(fid, false);
 
             break;
         }
         case 10:
         {
-            impedance->clearLogFile();
+            logger->clearLogFile(impedance);
             break;
         }
 
         case 11:
-            if(impedance->saveLog())
+
+            return 0;
+
+            break;
+
+        case 12:
+            if(logger->saveLog())
                 return 0;
             else
                 cout << "Something went wrong while trying to save the log." << endl;
@@ -372,11 +390,6 @@ int main(int argc, char *argv[])
 
             break;
 
-        case 12:
-
-            return 0;
-
-            break;
         default:
             cout << "Invalid mode selection. Try again." << endl;
             break;

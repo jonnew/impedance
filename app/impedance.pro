@@ -8,6 +8,7 @@ QT       += core
 
 QT       -= gui
 
+
 TARGET = impedance.bin
 
 TEMPLATE = app
@@ -27,12 +28,9 @@ SOURCES += main.cpp \
     randomnumber.cpp \
     signalgroup.cpp \
     signalsources.cpp \
-    platecontrol.cpp
-
-OTHER_FILES += \
-#    okFrontPanel.dll\
-    okFrontPanel.so \
-    main.bit
+    platecontrol.cpp \
+    autoimpedance.cpp \
+    impedancelog.cpp
 
 HEADERS += \
     okFrontPanelDLL.h \
@@ -47,4 +45,17 @@ HEADERS += \
     signalgroup.h \
     signalsources.h \
     qtinclude.h \
-    platecontrol.h
+    platecontrol.h \
+    autoimpedance.h \
+    impedancelog.h
+
+# Installation step to transfer required files to build directory
+install_it.path = $$OUT_PWD
+install_it.files += \
+    ./resources/main.bit\
+    ./resources/linux-64/libokFrontPanel.so \
+    ./resources/mac-os-x/libokFrontPanel.dylib \
+    ./resources/windows/okFrontPanel.dll
+
+INSTALLS += install_it
+

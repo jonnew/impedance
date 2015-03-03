@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/opal-kelly">
+        <file>opal-kelly-drivers/linux-32/libokFrontPanel.so</file>
+        <file>opal-kelly-drivers/linux-64/libokFrontPanel.so</file>
+        <file>opal-kelly-drivers/max-os-x/libokFrontPanel.dylib</file>
+        <file>opal-kelly-drivers/windows/okFrontPanel.dll</file>
+        <file>main.bit</file>
+    </qresource>
+</RCC>

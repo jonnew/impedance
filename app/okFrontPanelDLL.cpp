@@ -40,15 +40,15 @@
 		#if defined(_UNICODE)
 			#define okLIB_NAME L"okFrontPanel.dll"
 		#else
-			#define okLIB_NAME "okFrontPanel.dll"
+            #define okLIB_NAME "./okFrontPanel.dll"
 		#endif
 	#endif
 #elif defined(__APPLE__)
 	#include <dlfcn.h>
-	#define okLIB_NAME "libokFrontPanel.dylib"
+    #define okLIB_NAME "./libokFrontPanel.dylib"
 #elif defined(__linux__)
 	#include <dlfcn.h>
-	#define okLIB_NAME "./libokFrontPanel.so"
+    #define okLIB_NAME "./libokFrontPanel.so"
 #elif defined(__QNX__)
 	#include <dlfcn.h>
 	#define okLIB_NAME "./libokFrontPanel.so.1"

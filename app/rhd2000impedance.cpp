@@ -14,13 +14,11 @@
 
 using namespace std;
 
-RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
+RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port, ImpedanceLog *log)
 {
-    // Start the clock
-    timer.start();
 
     // Initialized default parameters
-    cout << "Intializing internal default parameters...";
+    cout << "Intializing hardware and default settings" << endl;
 
     // define the port to which the RHD2000 is attached
     usedPort = port; //0 = A, 1 = B, etc
@@ -39,8 +37,8 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     // Default electrode impedance measurement frequency
     desiredImpedanceFreq = 1000.0;
     actualImpedanceFreq = 0.0;
-    numPeriods = 10;
-    numAverages = 2;
+    numPeriods = 20;
+    numAverages = 3;
     impedanceFreqValid = false;
     impedanceConfigured = false;
     platingConfigured = false;
@@ -74,6 +72,7 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
         ttlOut[i] = 0;
     }
 
+
     // Perform internal hardware and measurement setups
     setupEvalBoard();
     setupAmplifier();
@@ -87,9 +86,10 @@ RHD2000Impedance::RHD2000Impedance(Rhd2000EvalBoard::BoardPort port)
     // Write down the parameters
     QJsonObject paramObject;
     writeParameters(paramObject);
-    log.append(paramObject);
+    log->append(paramObject);
 
-    cout << "done." << endl;
+    cout << "Intialization complete." << endl;
+
 }
 
 // Create auxiliary commands required to perform impedance testing. This function
@@ -260,7 +260,7 @@ void RHD2000Impedance::performADCSelfCalibration() {
 
 // Select the channel, relative the the currenly selected port, that should
 // be tied to the elec_test/impedance measurment AC coupling path on the RHD
-int RHD2000Impedance::selectChannel(int selectedChannel) {
+int RHD2000Impedance::setChannel(int selectedChannel) {
 
     // Check to see if the 64 channel chip is present
     int stream;
@@ -276,7 +276,7 @@ int RHD2000Impedance::selectChannel(int selectedChannel) {
     if (selectedChannel >= 32 && !rhd2164ChipPresent)
     {
         cout << "Selected channel = " << channel << " but a 64-channel "
-                                                    "chip was not detected." << endl;
+                "chip was not detected." << endl;
         return -1 ;
     }
     else if (selectedChannel >= 64) {
@@ -297,8 +297,13 @@ int RHD2000Impedance::selectChannel(int selectedChannel) {
 
 }
 
+int RHD2000Impedance::getChannel()
+{
+    return channel;
+}
+
 // Measure the impedance on selected channel
-int RHD2000Impedance::measureImpedance()
+int RHD2000Impedance::measureImpedance(ImpedanceLog *log)
 {
     // Stuff we will need to do the measurements
     int stream, capRange;
@@ -488,8 +493,8 @@ int RHD2000Impedance::measureImpedance()
             signalChannel->electrodeImpedancePhase = impedancePhase;
 
             QJsonObject impObject;
-            write(impObject, impedanceMagnitude,  impedancePhase);
-            log.append(impObject);
+            write(impObject, impedanceMagnitude,  impedancePhase, log->getElapsedTime());
+            log->append(impObject);
 
         }
     }
@@ -645,7 +650,7 @@ void RHD2000Impedance::setupEvalBoard()
 
     // Load Rhythm FPGA configuration bitfile (provided by Intan Technologies).
     // Place main.bit in the executable directory, or add a complete path to file.
-    string bitfilename = "main.bit";
+    string bitfilename = "./main.bit";
     if (!evalBoard->uploadFpgaBitfile(bitfilename))
     {
         cout << "FPGA configuration file upload error. "
@@ -1300,7 +1305,9 @@ void RHD2000Impedance::configurePlate(PlateControl *pc) {
 
 // This function manipulates the auxilary plating circuit through the pre-specifed
 // digital and analog port.
-int RHD2000Impedance::plate(PlateControl *pc) {
+int RHD2000Impedance::plate(PlateControl *pc, ImpedanceLog *log) {
+
+    cout << "Plating channel " << channel << " started." << endl;
 
     // Make sure that a channel has been selected for plating
     if (!channelSelected)
@@ -1320,13 +1327,18 @@ int RHD2000Impedance::plate(PlateControl *pc) {
 
     // Record the plating
     QJsonObject plateObject;
-    pc->writePlate(plateObject, channel,timer.elapsed());
-    log.append(plateObject);
+    pc->writePlate(plateObject, channel, log->getElapsedTime());
+    log->append(plateObject);
+
+    cout << "Plating finished." << endl;
+
 
     return 0;
 }
 
-int RHD2000Impedance::clean(PlateControl *pc) {
+int RHD2000Impedance::clean(PlateControl *pc, ImpedanceLog *log) {
+
+    cout << "Cleaning channel " << channel << " started." << endl;
 
     // Make sure that a channel has been selected for plating
     if (!channelSelected)
@@ -1346,8 +1358,10 @@ int RHD2000Impedance::clean(PlateControl *pc) {
 
     // Record the plating
     QJsonObject cleanObject;
-    pc->writeClean(cleanObject, channel, timer.elapsed());
-    log.append(cleanObject);
+    pc->writeClean(cleanObject, channel, log->getElapsedTime());
+    log->append(cleanObject);
+
+    cout << "Cleaning finished." << endl;
 
     return 0;
 }
@@ -1392,10 +1406,10 @@ void RHD2000Impedance::applyCurrent(PlateControl *pc) {
 
 }
 
-void RHD2000Impedance::write(QJsonObject &json, double mag, double phase) const
+void RHD2000Impedance::write(QJsonObject &json, double mag, double phase, int timeMsec) const
 {
-    json["name"] = "impedance_test_entry";
-    json["time_msec"] = timer.elapsed();
+    json["name"] =  (QString)"impedance_test_entry";
+    json["time_msec"] = timeMsec;
     json["channel"] = channel;
     json["test_freq"] = actualImpedanceFreq;
     json["num_test_averages"] = numAverages;
@@ -1410,7 +1424,7 @@ void RHD2000Impedance::writeParameters(QJsonObject &json) const {
 
     QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd-hh-mm-ss-zzz");
 
-    json["name"] = "recording_parameters";
+    json["name"] =  (QString)"recording_parameters";
     json["start_time"] = now;
     json["port_under_test"] = usedPort;
     json["sample_freq"] = boardSampleRate;
@@ -1424,73 +1438,6 @@ void RHD2000Impedance::writeParameters(QJsonObject &json) const {
     json["rhd_lower_bandwidth"] = actualLowerBandwidth;
     json["rhd_upper_bandwidth"] = actualUpperBandwidth;
 }
-
-void RHD2000Impedance::clearLogFile() {
-
-    // Clear the log and start over
-    while (!log.isEmpty()) {
-        log.removeFirst();
-    }
-
-    // Write down the parameters
-    QJsonObject paramObject;
-    writeParameters(paramObject);
-    log.append(paramObject);
-
-    cout << "Log cleared." << endl;
-}
-
-bool RHD2000Impedance::saveLog() {
-
-    QFile saveFile(logFile.absoluteFilePath());
-
-    if (!saveFile.open(QIODevice::WriteOnly)) {
-        qWarning("Couldn't open save file.");
-        return false;
-    }
-
-    QJsonObject json;
-    json["log"] = log;
-
-    QJsonDocument saveDoc(json);
-    saveFile.write(saveDoc.toJson());
-
-    cout << "Log saved." << endl;
-    return true;
-}
-
-void RHD2000Impedance::setSaveLocation(QString fname) {
-
-    if (!fname.endsWith(".json")){
-        fname.append(".json");
-    }
-
-    QFileInfo f = QFileInfo(fname);
-
-    if (!QDir(f.absoluteDir()).exists() ) {
-        cout << "Selected log file save directory does not exist: " + f.path().toStdString() << endl;
-        return;
-    }
-
-    if (f.exists() && f.isFile()) {
-        string overwrite;
-        cout << "Selected log file already exists. Overwrite (y/n)?" << endl;
-        cin >> overwrite;
-        if (!(overwrite == "Y" || overwrite == "y")) {
-            return;
-        }
-    }
-    else {
-        cout << "Log save location set to " << f.absoluteFilePath().toStdString() << "." << endl;
-        logFile = f;
-    }
-}
-
-
-
-
-
-
 
 
 

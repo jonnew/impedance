@@ -6,7 +6,7 @@
 <setting alwaysvectorfont="no"/>
 <setting verticaltext="up"/>
 </settings>
-<grid distance="0.1" unitdist="inch" unit="inch" style="lines" multiple="1" display="yes" altdistance="0.025" altunitdist="inch" altunit="inch"/>
+<grid distance="0.01" unitdist="inch" unit="inch" style="lines" multiple="1" display="yes" altdistance="0.025" altunitdist="inch" altunit="inch"/>
 <layers>
 <layer number="1" name="Top" color="4" fill="1" visible="yes" active="yes"/>
 <layer number="2" name="Route2" color="1" fill="3" visible="no" active="no"/>
@@ -8160,16 +8160,16 @@
 <text x="-11.03" y="-4.21" size="1.6764" layer="25" rot="R90">&gt;NAME</text>
 </package>
 <package name="WIRES-6">
-<wire x1="-8.255" y1="1.5875" x2="8.255" y2="1.5875" width="0.127" layer="21"/>
-<wire x1="8.255" y1="1.5875" x2="8.255" y2="-1.5875" width="0.127" layer="21"/>
-<wire x1="8.255" y1="-1.5875" x2="-8.255" y2="-1.5875" width="0.127" layer="21"/>
-<wire x1="-8.255" y1="-1.5875" x2="-8.255" y2="1.5875" width="0.127" layer="21"/>
-<pad name="3" x="-1.27" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="5" x="3.81" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="1" x="-6.35" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="6" x="6.35" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="4" x="1.27" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="2" x="-3.81" y="0" drill="0.8128" shape="long" rot="R90"/>
+<wire x1="-8.255" y1="2.0955" x2="8.255" y2="2.0955" width="0.127" layer="21"/>
+<wire x1="8.255" y1="2.0955" x2="8.255" y2="-2.0955" width="0.127" layer="21"/>
+<wire x1="8.255" y1="-2.0955" x2="-8.255" y2="-2.0955" width="0.127" layer="21"/>
+<wire x1="-8.255" y1="-2.0955" x2="-8.255" y2="2.0955" width="0.127" layer="21"/>
+<pad name="3" x="-1.27" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="5" x="3.81" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="1" x="-6.35" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="6" x="6.35" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="4" x="1.27" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="2" x="-3.81" y="0" drill="1" shape="long" rot="R90"/>
 <text x="-7.9375" y="-0.9525" size="1.016" layer="21" font="vector">1</text>
 <text x="7.3025" y="-0.9525" size="1.016" layer="21" font="vector">6</text>
 </package>

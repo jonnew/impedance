@@ -1,14 +1,49 @@
-# No compiled stuff
-*.exe
+# Ignore the backup files created by EAGLE
+*.s\#*
+*.b\#*
+*.l\#*
+*.gpi
+*.dri
+
+# Compiled Object files
+*.slo
+*.lo
 *.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
 *.so
-*.zip
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
 *.bin
 
-# Don't track builds
-build/**
-**/*build*
-Makefile
+# All bin directories
+bin/ 
+build/
+release/
+debug/
+
+# Vim files
+.*.swp
+.*.swo
 
 # QT Creator crap
 *.pro.user*

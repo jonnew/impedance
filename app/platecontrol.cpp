@@ -24,8 +24,8 @@ PlateControl::PlateControl(double currentGainuAPerVolt)
     ttl = 0;
 
     // Set some defaults
-    plateCurrentuA = -1.0;
-    plateDurationMilliSec = 1000;
+    plateCurrentuA = -1.5;
+    plateDurationMilliSec = 3000;
     cleaningCurrentuA = 1.0;
     cleaningDurationMilliSec = 1000;
     mode = PLATE;

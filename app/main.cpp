@@ -340,6 +340,8 @@ int main(int argc, char *argv[])
                     cout << "Enter a new cleaning current (uA)" << endl;
                     cin >> cc;
                     plateControl->setCleaningCurrent(cc);
+
+                    break;
                 }
 
                 case 10:

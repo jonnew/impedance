@@ -2643,16 +2643,16 @@ grid 2.54 mm</description>
 <rectangle x1="2.0587" y1="-2.9731" x2="2.3763" y2="-2.0206" layer="51"/>
 </package>
 <package name="WIRES-6">
-<wire x1="-8.255" y1="1.5875" x2="8.255" y2="1.5875" width="0.127" layer="21"/>
-<wire x1="8.255" y1="1.5875" x2="8.255" y2="-1.5875" width="0.127" layer="21"/>
-<wire x1="8.255" y1="-1.5875" x2="-8.255" y2="-1.5875" width="0.127" layer="21"/>
-<wire x1="-8.255" y1="-1.5875" x2="-8.255" y2="1.5875" width="0.127" layer="21"/>
-<pad name="3" x="-1.27" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="5" x="3.81" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="1" x="-6.35" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="6" x="6.35" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="4" x="1.27" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="2" x="-3.81" y="0" drill="0.8128" shape="long" rot="R90"/>
+<wire x1="-8.255" y1="2.0955" x2="8.255" y2="2.0955" width="0.127" layer="21"/>
+<wire x1="8.255" y1="2.0955" x2="8.255" y2="-2.0955" width="0.127" layer="21"/>
+<wire x1="8.255" y1="-2.0955" x2="-8.255" y2="-2.0955" width="0.127" layer="21"/>
+<wire x1="-8.255" y1="-2.0955" x2="-8.255" y2="2.0955" width="0.127" layer="21"/>
+<pad name="3" x="-1.27" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="5" x="3.81" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="1" x="-6.35" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="6" x="6.35" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="4" x="1.27" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="2" x="-3.81" y="0" drill="1" shape="long" rot="R90"/>
 <text x="-7.9375" y="-0.9525" size="1.016" layer="21" font="vector">1</text>
 <text x="7.3025" y="-0.9525" size="1.016" layer="21" font="vector">6</text>
 </package>

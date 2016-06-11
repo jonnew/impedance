@@ -101,15 +101,15 @@
 <rectangle x1="77.47" y1="7.62" x2="111.76" y2="9.398" layer="43"/>
 <rectangle x1="77.724" y1="17.018" x2="102.362" y2="25.4" layer="43"/>
 <rectangle x1="77.47" y1="10.16" x2="111.76" y2="11.938" layer="43"/>
-<text x="73.025" y="63.5" size="3.81" layer="21" font="vector" ratio="19" rot="SR0">PLATE</text>
-<text x="75.438" y="67.564" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">BK</text>
-<text x="77.724" y="67.564" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">BR</text>
-<text x="80.264" y="68.326" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">R</text>
-<text x="82.804" y="68.326" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">O</text>
-<text x="85.344" y="68.326" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">Y</text>
-<text x="87.884" y="68.326" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">G</text>
+<text x="73.025" y="63.246" size="3.81" layer="21" font="vector" ratio="19" rot="SR0">PLATE</text>
+<text x="75.438" y="67.31" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">BK</text>
+<text x="77.724" y="67.31" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">BR</text>
+<text x="80.264" y="68.072" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">R</text>
+<text x="82.804" y="68.072" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">O</text>
+<text x="85.344" y="68.072" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">Y</text>
+<text x="87.884" y="68.072" size="1.016" layer="21" font="vector" ratio="19" rot="SR90">G</text>
 <rectangle x1="38.735" y1="63.5" x2="47.625" y2="67.31" layer="43"/>
-<rectangle x1="73.025" y1="63.5" x2="89.535" y2="67.31" layer="43"/>
+<rectangle x1="73.025" y1="63.246" x2="89.535" y2="67.056" layer="43"/>
 </plain>
 <libraries>
 <library name="RHD2000_eval_board">
@@ -1567,16 +1567,16 @@ grid 2.54 mm</description>
 <rectangle x1="2.0587" y1="-2.9731" x2="2.3763" y2="-2.0206" layer="51"/>
 </package>
 <package name="WIRES-6">
-<wire x1="-8.255" y1="1.5875" x2="8.255" y2="1.5875" width="0.127" layer="21"/>
-<wire x1="8.255" y1="1.5875" x2="8.255" y2="-1.5875" width="0.127" layer="21"/>
-<wire x1="8.255" y1="-1.5875" x2="-8.255" y2="-1.5875" width="0.127" layer="21"/>
-<wire x1="-8.255" y1="-1.5875" x2="-8.255" y2="1.5875" width="0.127" layer="21"/>
-<pad name="3" x="-1.27" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="5" x="3.81" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="1" x="-6.35" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="6" x="6.35" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="4" x="1.27" y="0" drill="0.8128" shape="long" rot="R90"/>
-<pad name="2" x="-3.81" y="0" drill="0.8128" shape="long" rot="R90"/>
+<wire x1="-8.255" y1="2.0955" x2="8.255" y2="2.0955" width="0.127" layer="21"/>
+<wire x1="8.255" y1="2.0955" x2="8.255" y2="-2.0955" width="0.127" layer="21"/>
+<wire x1="8.255" y1="-2.0955" x2="-8.255" y2="-2.0955" width="0.127" layer="21"/>
+<wire x1="-8.255" y1="-2.0955" x2="-8.255" y2="2.0955" width="0.127" layer="21"/>
+<pad name="3" x="-1.27" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="5" x="3.81" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="1" x="-6.35" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="6" x="6.35" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="4" x="1.27" y="0" drill="1" shape="long" rot="R90"/>
+<pad name="2" x="-3.81" y="0" drill="1" shape="long" rot="R90"/>
 <text x="-7.9375" y="-0.9525" size="1.016" layer="21" font="vector">1</text>
 <text x="7.3025" y="-0.9525" size="1.016" layer="21" font="vector">6</text>
 </package>

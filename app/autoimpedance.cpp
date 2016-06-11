@@ -19,6 +19,7 @@ bool AutoImpedance::autoPlate(RHD2000Impedance *imp, PlateControl *plateControl,
 
     // Create a new log to capture this autoplating session
     sessionLog = new ImpedanceLog();
+    double errorPerc = 1e300;
 
     int n = 0;
     while(fabs(errorPerc) > allowableErrorPercent && n < maxTries) {
@@ -26,7 +27,7 @@ bool AutoImpedance::autoPlate(RHD2000Impedance *imp, PlateControl *plateControl,
         imp->measureImpedance(sessionLog);
         imp->printImpedance();
         double currentImp = imp->getImpedanceMagnitude();
-        double errorPerc = 100.0 * (targetImpedance - currentImp)/targetImpedance;
+        errorPerc = 100.0 * (targetImpedance - currentImp)/targetImpedance;
 
         if (errorPerc < 0) {
             imp->plate(plateControl, sessionLog);

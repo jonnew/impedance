@@ -1849,11 +1849,11 @@ Please make sure your boards conform to these design rules.</description>
 </element>
 <element name="R2" library="RHD2000_eval_board" package="0603" value="56.0K" x="21.59" y="67.31" smashed="yes" rot="R180">
 <attribute name="NAME" x="18.288" y="66.294" size="1.016" layer="25" font="vector" ratio="19" rot="R90"/>
-<attribute name="VALUE" x="20.066" y="70.866" size="1.016" layer="27" font="vector" ratio="19"/>
+<attribute name="VALUE" x="19.558" y="66.294" size="1.016" layer="27" font="vector" ratio="19" rot="R90"/>
 </element>
 <element name="R1" library="RHD2000_eval_board" package="0603" value="30.1K" x="21.59" y="69.85" smashed="yes">
 <attribute name="NAME" x="20.066" y="72.136" size="1.016" layer="25" font="vector" ratio="19"/>
-<attribute name="VALUE" x="19.558" y="66.294" size="1.016" layer="27" font="vector" ratio="19" rot="R90"/>
+<attribute name="VALUE" x="20.066" y="70.866" size="1.016" layer="27" font="vector" ratio="19"/>
 </element>
 <element name="C2" library="RHD2000_eval_board" package="0603" value="15p" x="21.59" y="63.5" smashed="yes">
 <attribute name="NAME" x="18.288" y="62.738" size="1.016" layer="25" font="vector" ratio="19" rot="R90"/>

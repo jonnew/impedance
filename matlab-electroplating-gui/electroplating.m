@@ -1,0 +1,951 @@
+function varargout = electroplating(varargin)
+% ELECTROPLATING MATLAB GUI for electroplating.
+%
+% electroplating() runs the electroplating interface.
+
+% Edit the above text to modify the response to help electroplating
+
+% Last Modified by GUIDE v2.5 20-Feb-2015 13:43:55
+
+% Begin initialization code - DO NOT EDIT
+gui_Singleton = 1;
+gui_State = struct('gui_Name',       mfilename, ...
+                   'gui_Singleton',  gui_Singleton, ...
+                   'gui_OpeningFcn', @electroplating_OpeningFcn, ...
+                   'gui_OutputFcn',  @electroplating_OutputFcn, ...
+                   'gui_LayoutFcn',  [] , ...
+                   'gui_Callback',   []);
+if nargin && ischar(varargin{1})
+    gui_State.gui_Callback = str2func(varargin{1});
+end
+
+if nargout
+    [varargout{1:nargout}] = gui_mainfcn(gui_State, varargin{:});
+else
+    gui_mainfcn(gui_State, varargin{:});
+end
+% End initialization code - DO NOT EDIT
+
+
+% --- Executes just before electroplating is made visible.
+function electroplating_OpeningFcn(hObject, eventdata, handles, varargin)
+% This function has no output args, see OutputFcn.
+% hObject    handle to figure
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+% varargin   command line arguments to electroplating (see VARARGIN)
+
+% Choose default command line output for electroplating
+handles.output = hObject;
+
+% Change window title
+set(handles.figure1, 'Name', 'Intan RHD2000 Electroplating Interface');
+
+% Set up the stored data
+handles.stored = StoredData();
+handles.stored.Selected = 0;
+
+% Connect to an electroplating board
+handles.driver = rhd2000.Driver();
+handles.board = handles.driver.create_electroplating_board();
+
+% Configure board to use all 16 digital outputs
+config = handles.board.get_configuration_parameters();
+config.Board.DigitalOutputs.ComparatorsEnabled = false;
+handles.board.set_configuration_parameters(config);
+
+% Set the digital outputs to 0 current (they are initialized to all 0s)
+e = ElectroplatingBoardControl();
+e.Current = 0;
+e.ZCheckChannel = 0;
+handles.board.DigitalOutputs = e.DigitalOutputs;
+
+% Now set Analog Output 1 to be DacManual
+config.Board.AnalogOutputs.Sources{1}.Enabled = true;
+config.Board.AnalogOutputs.Sources{1}.DataSource = 8;
+handles.board.set_configuration_parameters(config);
+
+% And push settings to the board, so that the value of DacManual (0V) gets
+% sent to the output
+handles.board.run_fixed(1);
+handles.board.read_next_data_block();
+
+% Update handles structure
+guidata(hObject, handles);
+
+% Draw the initial GUI
+select_channel(handles, 0);
+set_target_impedance(handles);
+display_automatic_parameters(handles);
+display_manual_parameters(handles);
+
+% UIWAIT makes electroplating wait for user response (see UIRESUME)
+% uiwait(handles.figure1);
+
+
+% --- Outputs from this function are returned to the command line.
+function varargout = electroplating_OutputFcn(hObject, eventdata, handles) 
+% varargout  cell array for returning output args (see VARARGOUT);
+% hObject    handle to figure
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Get default command line output from handles structure
+varargout{1} = handles.output;
+
+
+% --- Executes on button press in read_impedances_button.
+function read_impedances_button_Callback(hObject, eventdata, handles)
+% hObject    handle to read_impedances_button (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+read_impedances(handles);
+select_channel(handles, 0);
+
+% --- Reads all the impedances
+function read_impedances(handles)
+% Don't want the user clicking on other buttons while we read.
+enable_disable_all(handles, false);
+
+% Set up the wait bar.  See 'doc waitbar' (not 'help') for detailed
+% information about this and below.
+h = waitbar(0, 'Measuring impedances', ...
+            'CreateCancelBtn',...
+            'setappdata(gcbf,''canceling'',1)');
+
+% This is used to allow cancellation.
+setappdata(h,'canceling',0);
+for i=1:128
+    if getappdata(h,'canceling')
+        break
+    end    
+    waitbar(i/129, h, sprintf('Measuring channel %d', i-1));
+    
+    % Clear the history for the electrode and measure it.
+    handles.stored.Electrodes{i}.reset_time();
+    read_impedance(handles, i-1);
+    
+    % Update the display
+    select_channel(handles, i-1);
+    enable_disable_all(handles, false); % hack to not have to deal with selected channel
+    
+    % Make sure the waitbar is on top
+    figure(h);
+end
+% Reading impedances this way leaves the LEDs on, so turn them off.
+handles.board.LEDs = zeros(8,1);
+
+waitbar(1,h,'Done');
+delete(h);       % DELETE the waitbar; don't try to CLOSE it.
+
+% Now re-enable the buttons.
+enable_disable_all(handles, true);
+
+% --- Draws the "All impedances" graph, i.e., the top one that says either
+% 'Present Impedance Magnitudes' or 'Present Impedance Phases'
+function draw_all_impedances(handles)
+
+axes(handles.all_electrodes_plot);
+[indices, impedances] = handles.stored.get_impedances();
+if handles.stored.DisplayMagnitudes
+    plot_impedance_magnitudes(indices, impedances, get_threshold(handles), handles.stored.Selected);
+else
+    plot_impedance_phases(indices, impedances, handles.stored.Selected);
+end
+set(handles.all_electrodes_plot, 'ButtonDownFcn', ...
+    @(hObject,eventdata)electroplating('all_electrodes_plot_ButtonDownFcn',hObject,eventdata,guidata(hObject)));
+c = get(handles.all_electrodes_plot, 'Children');
+for i=1:length(c)
+    set(c(i), 'HitTest', 'off');
+end
+
+% --- Draws the "Impedance History" graph
+function draw_impedance_history(handles)
+
+axes(handles.current_electrode_plot);
+electrode = handles.stored.Electrodes{handles.stored.Selected + 1};
+plot_history(electrode.MeasurementTimes, electrode.ImpedanceHistory, ...
+             electrode.PulseTimes, electrode.PulseDurations, ...
+             get_threshold(handles), handles.stored.Selected);
+
+function value = get_threshold(handles)
+if handles.stored.UseTargetImpedance
+    value = handles.stored.Threshold;
+else
+    value = [];
+end
+
+% --- Executes on button press in magnitudes_button.
+function magnitudes_button_Callback(hObject, eventdata, handles)
+% hObject    handle to magnitudes_button (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+handles.stored.DisplayMagnitudes = get(hObject, 'Value');
+redraw_gui(handles);
+
+% --- Executes on button press in phases_button.
+function phases_button_Callback(hObject, eventdata, handles)
+% hObject    handle to phases_button (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+handles.stored.DisplayMagnitudes = ~get(hObject, 'Value');
+redraw_gui(handles);
+
+
+% --- Called when you change the target impedance
+function impedance_Callback(hObject, eventdata, handles)
+% hObject    handle to impedance (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+set_target_impedance(handles);
+draw_all_impedances(handles);
+draw_impedance_history(handles);
+
+
+% --- Executes during object creation, after setting all properties.
+function impedance_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to impedance (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Set the target impedance to match the value selected in the GUI
+function set_target_impedance(handles)
+
+impedance_kilo = str2double(get(handles.impedance, 'String'));
+set_impedance(handles, impedance_kilo);
+
+% --- Set the target impedance to the given value, in kOhms
+function set_impedance(handles, impedance_kilo)
+
+if impedance_kilo < 10
+    impedance_kilo = 10;
+end
+if impedance_kilo > 10000
+    impedance_kilo = 10000;
+end
+
+set(handles.impedance, 'String', sprintf('%g', impedance_kilo));
+
+handles.stored.Threshold = impedance_kilo * 1000;
+
+% --- Displays the textual list of parameters for automatic plating
+function display_automatic_parameters(handles)
+
+if handles.stored.AutomaticIsVoltageMode
+    line1 = 'Mode: Constant Voltage';
+    line2 = sprintf('Value: %g V', handles.stored.AutomaticValue);
+else
+    line1 = 'Mode: Constant Current';
+    % We store the values as amperes, but display nA, hence conversion.
+    line2 = sprintf('Value: %g nA', good_round(handles.stored.AutomaticValue / 1e-9, 3, 'significant'));
+end
+line3 = sprintf('Initial duration: %g s', handles.stored.AutomaticDuration);
+
+set(handles.automatic_parameters, 'String', ...
+    sprintf('%s\n%s\n%s', line1, line2, line3));
+        
+% --- Displays the textual list of parameters for manual pulse
+function display_manual_parameters(handles)
+
+line1 = sprintf('Channel: %d', handles.stored.Selected);
+if handles.stored.ManualIsVoltageMode
+    line2 = 'Mode: Constant Voltage';
+    line3 = sprintf('Value: %g V', handles.stored.ManualValue);
+else
+    line2 = 'Mode: Constant Current';
+    % We store the values as amperes, but display nA, hence conversion.
+    line3 = sprintf('Value: %g nA', good_round(handles.stored.ManualValue / 1e-9, 3, 'significant'));
+end
+line4 = sprintf('Duration: %g s', handles.stored.ManualDuration);
+
+set(handles.manual_parameters, 'String', ...
+    sprintf('%s\n%s\n%s\n%s', line1,line2, line3, line4));
+        
+
+% --- Call when a different channel is selected
+function select_channel_Callback(hObject, eventdata, handles)
+% hObject    handle to select_channel (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+selected = get_selected_channel(handles);
+select_channel(handles, selected);
+
+% --- Gets the currently selected channel
+function value = get_selected_channel(handles)
+value = str2double(get(handles.select_channel,'String'));
+
+% --- Select a different channel
+function select_channel(handles, selected)
+% Make sure it's in the range 0..127
+if selected < 0
+    selected = 0;
+end
+if selected > 127
+    selected = 127;
+end
+set(handles.select_channel,'String',sprintf('%d', selected));
+
+handles.stored.Selected = selected;
+redraw_gui(handles);
+
+% --- Helper function to enable or disable one of the UI elements, based on
+% value, which is a logical true or false.
+function enable_disable(handle, value)
+if value == true
+    set(handle, 'Enable', 'on');
+else
+    set(handle, 'Enable', 'off');
+end
+
+% --- Executes during object creation, after setting all properties.
+function select_channel_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to select_channel (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes when you press "Configure" for automatic plating
+function configure_automatic_Callback(hObject, eventdata, handles)
+% hObject    handle to configure_automatic (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+[ok, voltage_mode, value, duration] = ...
+    configuration(handles.stored.AutomaticIsVoltageMode, ...
+                  handles.stored.AutomaticValue, ...
+                  handles.stored.AutomaticDuration);
+if ok
+    handles.stored.AutomaticIsVoltageMode = voltage_mode;
+    handles.stored.AutomaticValue = value;
+    handles.stored.AutomaticDuration = duration;
+    display_automatic_parameters(handles);
+end
+
+
+% --- Executes when you press "Configure" for manual pulse
+function configure_manual_Callback(hObject, eventdata, handles)
+% hObject    handle to configure_manual (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+[ok, voltage_mode, value, duration] = ...
+    configuration(handles.stored.ManualIsVoltageMode, ...
+                  handles.stored.ManualValue, ...
+                  handles.stored.ManualDuration);
+if ok
+    handles.stored.ManualIsVoltageMode = voltage_mode;
+    handles.stored.ManualValue = value;
+    handles.stored.ManualDuration = duration;
+    display_manual_parameters(handles);
+end
+
+
+% --- Executes when you click "Apply" for a manual pulse
+function apply_manual_pulse_Callback(hObject, eventdata, handles)
+% hObject    handle to apply_manual_pulse (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+handles.stored.Electrodes{handles.stored.Selected + 1}.reset_time();
+h = waitbar(0, 'Manual Pulse', ...
+            'CreateCancelBtn',...
+            'setappdata(gcbf,''canceling'',1)');
+
+setappdata(h,'canceling',0);
+
+% Measure before pulsing
+if getappdata(h,'canceling') == 0
+    waitbar(1/6, h, 'Measuring pre-pulse impedance');
+    figure(h);   
+    read_impedance(handles, handles.stored.Selected);
+    redraw_gui(handles);
+end
+
+% Delay before pulsing
+if getappdata(h,'canceling') == 0
+    waitbar(2/6, h, 'Delaying before pulse');
+    figure(h);
+    pause(handles.stored.DelayBeforePulse);
+    redraw_gui(handles);
+end
+
+% Pulse
+if getappdata(h,'canceling') == 0
+    waitbar(3/6, h, 'Manual pulse');
+    figure(h);   
+    pulse(handles, ...
+          handles.stored.Selected, handles.stored.ManualIsVoltageMode, ...
+          handles.stored.ManualValue, handles.stored.ManualDuration);
+    redraw_gui(handles);
+end
+
+% Delay after pulsing
+if getappdata(h,'canceling') == 0
+    waitbar(4/6, h, 'Delaying after pulse');
+    figure(h);
+    pause(handles.stored.DelayAfterPulse);
+    redraw_gui(handles);
+end
+
+% Measure after pulsing
+if getappdata(h,'canceling') == 0
+    waitbar(5/6, h, 'Measuring post-pulse impedance');
+    figure(h);   
+    read_impedance(handles, handles.stored.Selected);  
+end
+
+redraw_gui(handles);
+
+waitbar(1,h,'Done');
+delete(h);       % DELETE the waitbar; don't try to CLOSE it.
+
+% Reading impedances this way leaves the LEDs on, so turn them off.
+handles.board.LEDs = zeros(8,1);
+
+
+% --- Executes when you click "Apply" for a manual pulse
+function apply_manual_pulse_all_channels_Callback(hObject, eventdata, handles)
+% hObject    handle to apply_manual_pulse (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Don't want the user clicking on other buttons while we read.
+enable_disable_all(handles, false);
+
+% Set up the wait bar.  See 'doc waitbar' (not 'help') for detailed
+% information about this and below.
+h = waitbar(0, 'Applying manual pulses', ...
+            'CreateCancelBtn',...
+            'setappdata(gcbf,''canceling'',1)');
+
+% This is used to allow cancellation.
+setappdata(h,'canceling',0);
+
+% Update the display
+select_channel(handles, 0);
+
+for i=1:128
+    if getappdata(h,'canceling')
+        break
+    end    
+    waitbar(i/129, h, sprintf('Pulsing channel %d', i-1));
+    
+    %pause(handles.stored.DelayBeforePulse);
+    pulse(handles, ...
+      handles.stored.Selected, handles.stored.ManualIsVoltageMode, ...
+      handles.stored.ManualValue, handles.stored.ManualDuration);
+    pause(handles.stored.DelayAfterPulse);
+    read_impedance(handles, handles.stored.Selected);  
+    redraw_gui(handles);
+       
+    % Update the display
+    select_channel(handles, i-1);
+    enable_disable_all(handles, false); % hack to not have to deal with selected channel
+    
+    % Make sure the waitbar is on top
+    figure(h);
+end
+
+% Reading impedances this way leaves the LEDs on, so turn them off.
+handles.board.LEDs = zeros(8,1);
+
+waitbar(1,h,'Done');
+delete(h);       % DELETE the waitbar; don't try to CLOSE it.
+
+% Now re-enable the buttons.
+enable_disable_all(handles, true);
+
+
+% --- Executes when you press "Run" in automatic plating
+function run_automatic_Callback(hObject, eventdata, handles)
+
+% Figure out which channels to run
+if get(handles.run_all_button, 'Value') == 1
+    to_run = 0:127;
+elseif get(handles.run_selected_button, 'Value') == 1
+    to_run = get_selected_channel(handles);
+elseif get(handles.run_0_to_63_button, 'Value') == 1
+    to_run = 0:63;
+else
+    to_run = 64:127;
+end
+
+% Plate
+h = waitbar(0, 'Plating automatically', ...
+            'CreateCancelBtn',...
+            'setappdata(gcbf,''canceling'',1)');
+
+setappdata(h,'canceling',0);
+for i=1:length(to_run)
+    if getappdata(h,'canceling')
+        break
+    end
+    plate_one_automatically(handles, to_run(i), h, i/(length(to_run) + 1));
+end
+
+% Clean up
+waitbar(1,h,'Done');
+delete(h);       % DELETE the waitbar; don't try to CLOSE it.
+
+% Reading impedances this way leaves the LEDs on, so turn them off.
+handles.board.LEDs = zeros(8,1);
+
+% --- Plate one electrode automatically
+function plate_one_automatically(handles, index, waitbar_handle, fraction_complete)
+% handles - global handles object for GUI and board access
+% index - index of the electrode to plate (0-127)
+% waitbar_handle - handle fo the waitbar
+% fraction_complete - value for the waitbar handle - for example, if you're
+%                     plating 128 channels, this might be 1/128 or 86/128.
+
+select_channel(handles, index);
+% Don't want people hitting other buttons while plating
+enable_disable_all(handles, false);
+figure(waitbar_handle);
+
+% Clear history for the given electrode, and take a reading before we start
+handles.stored.Electrodes{handles.stored.Selected + 1}.reset_time();
+read_impedance(handles, handles.stored.Selected);
+figure(waitbar_handle);
+
+% Basic algorithm is simple:
+% while (impedance > target)
+%      plate for fixed time
+%      remeasure impedance
+
+% Do at most 10 iterations; we don't want an infinite loop if one of the
+% electrodes just isn't working.
+count = 0;
+while keep_going(handles, count, index)
+    if getappdata(waitbar_handle, 'canceling')
+        break
+    end
+
+    % Delay before
+    waitbar(fraction_complete, waitbar_handle, sprintf('Plating channel %d - delay before pulse', index));
+    pause(handles.stored.DelayBeforePulse);
+    
+    if getappdata(waitbar_handle, 'canceling')
+        break
+    end
+    
+    % Pulse
+    waitbar(fraction_complete, waitbar_handle, sprintf('Plating channel %d - pulsing', index));
+    pulse(handles, ...
+          index, handles.stored.AutomaticIsVoltageMode, ...
+          handles.stored.AutomaticValue, handles.stored.AutomaticDuration);
+
+    if getappdata(waitbar_handle, 'canceling')
+        break
+    end
+    
+    % Delay after
+    waitbar(fraction_complete, waitbar_handle, sprintf('Plating channel %d - delay after pulse', index));
+    pause(handles.stored.DelayAfterPulse);
+    
+    if getappdata(waitbar_handle, 'canceling')
+        break
+    end
+    
+    % Measure
+    waitbar(fraction_complete, waitbar_handle, sprintf('Plating channel %d - measuring impedance', index));
+    read_impedance(handles, index);  
+    
+    % Refresh UI
+    redraw_gui(handles);
+    
+    figure(waitbar_handle);
+      
+    count = count + 1;
+end
+
+% Re-enable things
+enable_disable_all(handles, true);
+select_channel(handles, index); % re-enable up/down arrows
+
+% Helper function, used above to determine if we should keep loopint
+function value = keep_going(handles, count, index)
+if count >= handles.stored.MaxPulses
+    % Hit the maximum number of pulses; time to stop
+    value = false;
+else
+    if handles.stored.UseTargetImpedance
+        % Keep going as long as the impedance is above the target
+        impedance_magnitude = abs(handles.stored.Electrodes{index + 1}.CurrentImpedance);
+        value = (impedance_magnitude > handles.stored.Threshold);
+    else
+        % Keep going until we hit MaxPulses limit above
+        value = true;
+    end
+end
+
+% --- Read one impedance
+function read_impedance(handles, index)
+
+datasource = floor(index / 64); % 0 for 0-63, 1 for 64-127
+channel = mod(index, 64); % 0..127 -> 0..63
+
+% Check that the datasource is valid
+if datasource == 0
+    okay_to_read = handles.stored.Channels0to63;
+else
+    okay_to_read = handles.stored.Channels64to127;
+end
+
+% If the datasource is valid, check that the channel is valid
+if okay_to_read
+    okay_to_read = (channel < handles.board.Chips(datasource + 1).num_channels());
+end
+
+if okay_to_read
+    [impedance, ~] = ...
+        handles.board.measure_one_impedance(1000, datasource, channel);
+
+    handles.stored.Electrodes{index + 1}.add_measurement(impedance);
+else
+    handles.stored.Electrodes{index + 1}.reset_time();
+end
+
+% --- One pulse
+function pulse(handles, selected, is_voltage_mode, value, duration)
+
+% Record that we did it
+handles.stored.Electrodes{selected + 1}.add_pulse(duration);
+
+% Figure out settings
+e = ElectroplatingBoardControl();
+if is_voltage_mode
+    e.Voltage = value;
+else
+    e.Current = value;
+end
+
+% Plating below.  Note that we set up the chip first, set the digital
+% outputs, pause, set the digital outputs to turn plating off, set the
+% chip.  IN THAT ORDER.  Setting digital outputs is instantaneous, sending
+% information to the board takes time.
+
+% Start plating
+e.PlatingChannel = selected;
+handles.board.DacManual = e.DacManualDesired;
+handles.board.begin_plating(e.EffectiveChannel);
+
+set_digital_values(handles, e.DigitalOutputs);
+
+% Plate for the given duration
+pause(duration);
+
+% Stop plating
+e.ZCheckChannel = selected;
+set_digital_values(handles, e.DigitalOutputs);
+
+% Leave DacManual at 0V or 0 current.
+if e.ReferenceSelection
+    handles.board.DacManual = 3.3;
+else
+    handles.board.DacManual = 0;
+end
+handles.board.end_plating();
+
+% --- Sets the digitial outputs; pausing if the reference changes from 0V
+% to 3.3V or vice versa.
+function set_digital_values(handles, values)
+% If REF_SEL changes
+if handles.board.DigitalOutputs(8) ~= values(8)
+    % Change just that, and let it equilibrate
+    handles.board.DigitalOutputs(8) = values(8);
+    pause(1);
+end
+
+% Now change any/all other values
+handles.board.DigitalOutputs = values;
+
+
+% --- Executes if you press the channel down (<) button
+function channel_down_button_Callback(hObject, eventdata, handles)
+% hObject    handle to channel_down_button (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+select_channel(handles, get_selected_channel(handles) - 1);
+
+% --- Executes if you press the channel up (>) button
+function channel_up_button_Callback(hObject, eventdata, handles)
+% hObject    handle to channel_up_button (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+select_channel(handles, get_selected_channel(handles) + 1);
+
+
+% --- Executes if you press the continuous scan button.
+function continuous_scan_Callback(hObject, eventdata, handles)
+
+% Don't want anyone pushing any other buttons while this is running
+enable_disable_all(handles, false);
+
+h = waitbar(0, 'Scanning continuously', ...
+            'CreateCancelBtn',...
+            'setappdata(gcbf,''canceling'',1)');
+
+setappdata(h,'canceling',0);
+
+% Reset the history
+handles.stored.Electrodes{handles.stored.Selected + 1}.reset_time();
+
+while true
+    % Read impedance
+    waitbar(0, h, 'Reading impedance');
+    figure(h);   
+    read_impedance(handles, get_selected_channel(handles));
+    
+    redraw_gui(handles);
+
+    if getappdata(h,'canceling')
+        break;
+    end    
+
+    % Pause
+    waitbar(0, h, 'Pausing');
+    figure(h);   
+    pause(2);
+
+    if getappdata(h,'canceling')
+        break;
+    end    
+end
+
+waitbar(1, h, 'Done');
+delete(h);       % DELETE the waitbar; don't try to CLOSE it.
+
+% Reading impedances this way leaves the LEDs on, so turn them off.
+handles.board.LEDs = zeros(8,1);
+
+% Re-enable user input
+enable_disable_all(handles, true);
+
+
+% --------------------------------------------------------------------
+function top_menu_Callback(hObject, eventdata, handles)
+% hObject    handle to top_menu (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+
+% --------------------------------------------------------------------
+% When you click Save Settings from the menu
+function save_settings_Callback(hObject, eventdata, handles)
+% hObject    handle to save_settings (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+[filename, pathname] = uiputfile('settings.ips', 'Save Electroplating Settings');
+if isequal(filename,0) || isequal(pathname,0)
+    % User cancelled
+else
+    filepath = fullfile(pathname, filename);
+    handles.stored.save_settings(filepath);
+end
+
+% --------------------------------------------------------------------
+% When you click Load Settings from the menu
+function load_settings_Callback(hObject, eventdata, handles)
+% hObject    handle to load_settings (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+[filename, pathname] = uigetfile('settings.ips', 'Load Electroplating Settings');
+if isequal(filename,0) || isequal(pathname,0)
+    % User cancelled
+else
+    filepath = fullfile(pathname, filename);
+    handles.stored.load_settings(filepath);
+    % Update GUI
+    set_impedance(handles, handles.stored.Threshold / 1000);
+    redraw_gui(handles);
+end
+
+
+
+% --------------------------------------------------------------------
+% When you click Save Impedances from the menu
+function save_impedances_Callback(hObject, eventdata, handles)
+% hObject    handle to save_impedances (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+[filename, pathname] = uiputfile('impedances.csv', 'Save Impedance Data As');
+if isequal(filename,0) || isequal(pathname,0)
+    % User cancelled
+else
+    filepath = fullfile(pathname, filename);
+    handles.stored.save_impedances(filepath);
+end
+
+% --- Redraws everything in the GUI
+function redraw_gui(handles)
+
+selected = handles.stored.Selected;
+
+draw_all_impedances(handles);
+draw_impedance_history(handles);
+display_manual_parameters(handles);
+display_automatic_parameters(handles);
+set(handles.run_selected_button, 'String', ...
+    sprintf('Run Selected Channel (%d)', selected));
+enable_disable(handles.channel_down_button, (selected > 0));
+enable_disable(handles.channel_up_button, (selected < 127));
+enable_disable(handles.impedance, handles.stored.UseTargetImpedance);
+
+% Display the current impedance as text
+electrode = handles.stored.Electrodes{selected + 1};
+if isempty(electrode.ImpedanceHistory)
+    set(handles.selected_impedance, 'String', 'N/A');
+else
+    if get(handles.magnitudes_button, 'Value') == 1
+        z = abs(electrode.CurrentImpedance);
+        if z < 1000
+            string = sprintf('%g Ohms', good_round(z, 3, 'significant'));
+        elseif z < 1e6
+            string = sprintf('%g kOhms', good_round(z / 1000, 3, 'significant'));
+        else
+            string = sprintf('%g MOhms', good_round(z / 1e6, 3, 'significant'));
+        end
+    else
+        theta = angle(electrode.CurrentImpedance)*180/pi;
+        string = sprintf('%.0f degrees', theta);
+    end
+    set(handles.selected_impedance, 'String', string);
+end
+
+% --- Enable or disable all GUI elements
+function enable_disable_all(handles, value)
+enable_disable(handles.channel_down_button, value);
+enable_disable(handles.channel_up_button, value);
+enable_disable(handles.configure_manual, value);
+enable_disable(handles.apply_manual_pulse, value);
+enable_disable(handles.configure_automatic, value);
+enable_disable(handles.run_automatic, value);
+enable_disable(handles.read_impedances_button, value);
+enable_disable(handles.continuous_scan, value);
+
+enable_disable(handles.run_all_button, value);
+enable_disable(handles.run_selected_button, value);
+enable_disable(handles.run_0_to_63_button, value);
+enable_disable(handles.run_64_to_127_button, value);
+
+enable_disable(handles.magnitudes_button, value);
+enable_disable(handles.phases_button, value);
+
+
+
+% --- Executes on key press with focus on figure1 and none of its controls.
+function figure1_KeyPressFcn(hObject, eventdata, handles)
+% hObject    handle to figure1 (see GCBO)
+% eventdata  structure with the following fields (see MATLAB.UI.FIGURE)
+%	Key: name of the key that was pressed, in lower case
+%	Character: character interpretation of the key(s) that was pressed
+%	Modifier: name(s) of the modifier key(s) (i.e., control, shift) pressed
+% handles    structure with handles and user data (see GUIDATA)
+
+if strcmp(eventdata.Key, 'leftarrow')
+    select_channel(handles, get_selected_channel(handles) - 1);
+elseif strcmp(eventdata.Key, 'rightarrow')
+    select_channel(handles, get_selected_channel(handles) + 1);
+end
+
+% --- Executes when we click on the all electrodes plot
+function all_electrodes_plot_ButtonDownFcn(hObject, eventdata, handles)
+% hObject    handle to figure1 (see GCBO)
+% eventdata  structure with the following fields (see MATLAB.UI.FIGURE)
+%	Key: name of the key that was pressed, in lower case
+%	Character: character interpretation of the key(s) that was pressed
+%	Modifier: name(s) of the modifier key(s) (i.e., control, shift) pressed
+% handles    structure with handles and user data (see GUIDATA)
+
+currentpoint = get(gca, 'CurrentPoint');
+point = currentpoint(1,:);
+
+[hitNorm(1), hitNorm(2)] = normalized_position(handles.all_electrodes_plot, ...
+                        point(1), point(2));
+
+[indices, impedances] = handles.stored.get_impedances();
+impedances = abs(impedances);
+upper = 1e7;
+impedances(impedances > upper) = upper;
+lower = 1e4;
+impedances(impedances < lower) = lower;
+distances = zeros(1, length(indices));
+for i=1:length(indices)
+    [norm(1), norm(2)] = normalized_position(handles.all_electrodes_plot, ...
+                                indices(i), impedances(i));
+    delta = hitNorm - norm;
+    distances(i) = sqrt(delta * delta');
+end
+best_distance = min(distances);
+best_index = find(distances == best_distance);
+if ~isempty(best_index)
+    best_index = best_index(1);
+    select_channel(handles, indices(best_index));
+end
+
+
+% Takes a position x, y in a semilog plot (defined by handle), and returns
+% a normalized position, equivalent to pixel (or character) offset from the
+% 0, 0 position
+function [normX, normY] = normalized_position(handle, x, y)
+
+xlim = get(handle, 'XLim');
+ylim = get(handle, 'YLim');
+position = get(handle, 'Position');
+
+xmin = xlim(1);
+xmax = xlim(2);
+ymin = ylim(1);
+ymax = ylim(2);
+width = position(3);
+height = position(4);
+
+normX = (x - xmin) / (xmax - xmin) * width;
+normY = (log(y) - log(ymin)) / (log(ymax) - log(ymin)) * height;
+
+
+% --------------------------------------------------------------------
+function configure_settings_Callback(hObject, eventdata, handles)
+% hObject    handle to configure_settings (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+[ok, max_pulses, delay_before_pulse, delay_after_pulse, ...
+ channels_0_to_63, channels_64_to_127, use_target_impedance] = ...
+global_settings(handles.stored.MaxPulses, ...
+                handles.stored.DelayBeforePulse, ...
+                handles.stored.DelayAfterPulse, ...
+                handles.stored.Channels0to63, ...
+                handles.stored.Channels64to127, ...
+                handles.stored.UseTargetImpedance);
+if ok
+    handles.stored.MaxPulses = max_pulses;
+    handles.stored.DelayBeforePulse = delay_before_pulse;
+    handles.stored.DelayAfterPulse = delay_after_pulse;
+    handles.stored.Channels0to63 = channels_0_to_63;
+    handles.stored.Channels64to127 = channels_64_to_127;
+    handles.stored.UseTargetImpedance = use_target_impedance;
+    
+    redraw_gui(handles);
+end
